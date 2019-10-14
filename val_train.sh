@@ -1,0 +1,1 @@
+python ./train.py --save ./work/10-14_semi_dense161_maxval_3_lr_1e-4_drop_0.3_finetune_wd_1e-4_50_mixmath --sample_k 50 --max_val 3 --train_method semisuper --ngpu 1 --gpu_idx 2 --batchsize 10 --arch dense --drop_rate 0.3 --max_epochs 40 --n_epochs 150 
