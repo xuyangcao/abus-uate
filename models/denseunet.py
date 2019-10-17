@@ -70,13 +70,17 @@ class DenseUnet(nn.Module):
 
         # decorder
         if arch == '121':
-            self.up_1 = UpSampeBlock(1024+1024, 768)
+            self.up_1 = UpSampeBlock(1024+1024, 512)
+            self.up_2 = UpSampeBlock(512+512, 256)
+            self.up_3 = UpSampeBlock(256+256, 96)
         if arch == '161':
             self.up_1 = UpSampeBlock(2208+2112, 768)
+            self.up_2 = UpSampeBlock(768+768, 384)
+            self.up_3 = UpSampeBlock(384+384, 96)
         if arch == '201':
-            self.up_1 = UpSampeBlock(1920+1792, 768)
-        self.up_2 = UpSampeBlock(768+768, 384)
-        self.up_3 = UpSampeBlock(384+384, 96)
+            self.up_1 = UpSampeBlock(1920+1792, 512)
+            self.up_2 = UpSampeBlock(512+512, 256)
+            self.up_3 = UpSampeBlock(256+256, 96)
         self.up_4 = UpSampeBlock(96, 96)
         self.up_5 = UpSampeBlock(96, 64)
         self.output_block = OutputBlock(64, num_classes)
@@ -91,9 +95,13 @@ class DenseUnet(nn.Module):
         x_8 = self.transition_block_3(x_16)
         x_8 = self.dense_block_4(x_8)
         out = self.transition_block_4(x_8)
+        #print('out.shape: {}, x16.shape: {}'.format(out.shape, x_16.shape))
         out = self.up_1(out, x_16)
+        #print('out.shape: {}, x32.shape: {}'.format(out.shape, x_32.shape))
         out = self.up_2(out, x_32)
+        #print('out.shape: {}, x64.shape: {}'.format(out.shape, x_64.shape))
         out = self.up_3(out, x_64)
+        #print('out.shape: {}'.format(out.shape))
         out = self.up_4(out)
         out = self.up_5(out)
         out = self.output_block(out)

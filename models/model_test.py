@@ -1,5 +1,5 @@
 import torch 
-from models.dense-unet import DenseUnet
+from denseunet import DenseUnet
 
-model = DenseUnet(arch='201')
+model = DenseUnet(arch='121')
 print(model)
