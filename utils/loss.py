@@ -73,33 +73,12 @@ class MaskMSELoss(nn.Module):
         #labels = labels.float() #labels in dataset
         uncer = uncer.float() #current prediction uncertainty
 
-        #unlabeled_cond = labels[:, 0] < 0 #first element of all samples in a batch 
-        #unlabeled_nnz = torch.nonzero(unlabeled_cond) # get how many unlabeled samples in a batch 
-        #unlabeled_nbsup = len(unlabeled_nnz)
-        #print('unlabeled samples number:', unlabeled_nbsup)
+        mask = uncer > th
+        mask = mask.float()
+        mse = torch.sum(mask*(out - zcomp)**2) / torch.sum(mask) 
 
-        #labeled_cond = labels[:, 0] >= 0
-        #labeled_nnz = torch.nonzero(labeled_cond)
-        #labeled_nbsup = len(labeled_nnz)
-        #print('labeled samples number:', labeled_nbsup)
-
-        #labeled_mse = Variable(torch.FloatTensor([0.]).cuda())
-        #unlabeled_mse = Variable(torch.FloatTensor([0.]).cuda())
-        #if unlabeled_nbsup > 0:
-        #    unlabeled_outputs = torch.index_select(out, 0, unlabeled_nnz.view(unlabeled_nbsup)) #select all unlabeled data along 0 dimention 
-        #    unlabeled_labels = zcomp[unlabeled_cond]
-        #    unlabeled_uncer = uncer[unlabeled_cond]
-        #    mul = 1. - unlabeled_uncer 
-        #    unlabeled_mse = torch.sum(mul*(unlabeled_outputs - unlabeled_labels)**2) / unlabeled_outputs.data.nelement() 
-        #if labeled_nbsup > 0:
-        #    labeled_outputs = torch.index_select(out, 0, labeled_nnz.view(labeled_nbsup)) #select all labeled data along 0 dimention 
-        #    labeled_labels = labels[labeled_cond]
-        #    labeled_mse = torch.sum((labeled_outputs - labeled_labels)**2) / labeled_outputs.data.nelement() 
-        #    
-        #return labeled_mse + unlabeled_mse 
-
-        mul = 1. - uncer 
-        mse = torch.sum(mul*(out - zcomp)**2) / out.data.nelement() 
+        #mul = 1. - uncer 
+        #mse = torch.sum(mul*(out - zcomp)**2) / out.data.nelement() 
         return mse
 
 

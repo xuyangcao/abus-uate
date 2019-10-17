@@ -11,8 +11,8 @@ from torch.autograd import Variable
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid
-#from tensorboardX import SummaryWriter
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 from skimage.color import label2rgb 
 from skimage import measure
 import matplotlib.pyplot as plt
@@ -30,8 +30,8 @@ def get_args():
     print('initing args------')
     parser = argparse.ArgumentParser()
     parser.add_argument('--batchsize', type=int, default=16)
-    parser.add_argument('--ngpu', type=int, default=2)
-    parser.add_argument('--gpu_idx', default='1,2', type=str)
+    parser.add_argument('--ngpu', type=int, default=1)
+    parser.add_argument('--gpu_idx', default='0', type=str)
     parser.add_argument('--n_epochs', type=int, default=150)
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N')
@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument('--max_val', default=1, type=float) # maxmum of ramp-up function 
     parser.add_argument('--train_method', default='super', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
-    parser.add_argument('--arch', default='dense', type=str) #architecture
+    parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
     parser.add_argument('--dice_loss_focus', default=False, action='store_true') # whether use focus dice loss 
@@ -59,8 +59,8 @@ def get_args():
     parser.add_argument('--test_target_path', default='./data/test_label_2d/', type=str)
 
     args = parser.parse_args()
-    #os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_idx
-    torch.cuda.set_device(2)
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_idx
+    #torch.cuda.set_device(2)
     return args
 
 def main():
@@ -95,10 +95,17 @@ def main():
     # building  network #
     #####################
     print("building network-----")
-    if args.arch == 'dense': 
+    if args.arch == 'dense121': 
+        model = DenseUnet(arch='121', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
+    elif args.arch == 'dense161': 
         model = DenseUnet(arch='161', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
-    else:
+    elif args.arch == 'dense201': 
+        model = DenseUnet(arch='201', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
+    elif args.arch == 'resunet': 
         model = UNet(3, 2, relu=False)
+    else:
+        raise(RuntimeError('error in building network!'))
+        
     #x = torch.zeros((1, 3, 256, 256))
     #writer.add_graph(model, x)
     if args.ngpu > 1:
@@ -175,18 +182,20 @@ def main():
     ############
     err_best = 0.
     nTrain = len(train_set)
-    Z = torch.zeros(nTrain, 2, 224, 224).float()
-    z = torch.zeros(nTrain, 2, 224, 224).float()
-    outputs = torch.zeros(nTrain, 2, 224, 224).float()
-    uncertain_map = torch.zeros(nTrain, 2, 224, 224).float()  
+    width = 128 
+    height = 512 
+    Z = torch.zeros(nTrain, 2, width, height).float()
+    z = torch.zeros(nTrain, 2, width, height).float()
+    outputs = torch.zeros(nTrain, 2, width, height).float()
+    uncertain_map = torch.zeros(nTrain, 2, width, height).float()  
     #alpha = args.alpha_psudo
     for epoch in range(args.start_epoch, args.n_epochs + 1):
         if args.opt == 'sgd':
-            if (epoch+1) % 30 == 0:
+            if (epoch+1) % 20 == 0:
                 lr *= 0.1
         if args.opt == 'adam':
-            if (epoch+1) % 30 == 0:
-                if (epoch+1) % 60 == 0:
+            if (epoch+1) % 20 == 0:
+                if (epoch+1) % 40 == 0:
                     lr *= 0.2
                 else:
                     lr *= 0.5
@@ -225,7 +234,9 @@ def main():
 
 
 
-def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=5):
+def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=3):
+    width = 128 
+    height = 512 
     batch_size = args.ngpu * args.batchsize
     model.train()
 
@@ -239,7 +250,7 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
         indices = sample_indices[1]
         # read data
         data, target, psuedo_target, uncertain = sample['image'], sample['target'], sample['psuedo_target'], sample['uncertainty']
-        data_aug = gaussian_noise(data, batch_size)
+        data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
         data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
         psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)
         
@@ -264,7 +275,7 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
             #out_temp = out.clone()
             out_hat[0] = out.view(temp_out_shape)
             for t in range(T):
-                data_aug = gaussian_noise(data, batch_size)
+                data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
                 data_aug = Variable(data_aug.cuda())
                 out_hat[t+1] = F.softmax(model(data_aug), dim=1).view(temp_out_shape)
             aleatoric = torch.mean(out_hat*(1-out_hat), 0)
@@ -272,12 +283,12 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
             epistemic = (epistemic - epistemic.min()) / (epistemic.max() - epistemic.min())
             #aleatoric = (aleatoric - aleatoric.min()) / (aleatoric.max() - aleatoric.min())
 
-            p = torch.mean(out_hat, 0)
-            pt = p**(1 / T)
+            #p = torch.mean(out_hat, 0)
+            #pt = p**(1 / T)
             #print('pt.shape: ', pt.shape)
-            out_u = pt / pt.sum(dim=1, keepdim=True)
-            out_u = out_u.detach()
-            #out_u = out_hat[0]
+            #out_u = pt / pt.sum(dim=1, keepdim=True)
+            #out_u = out_u.detach()
+            out_u = out_hat[0]
 
         #outputs[batch_idx*batch_size:(batch_idx+1)*batch_size] = out.data.clone().cpu()
         for i, j in enumerate(indices):

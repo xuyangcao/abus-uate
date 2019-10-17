@@ -28,7 +28,7 @@ class ElasticTransform(object):
 
             p = Augmentor.DataPipeline(images)
             # resize
-            p.resize(probability=1, width=224, height=224)
+            p.resize(probability=1, width=512, height=128)
             sample_aug = p.sample(1)
 
             sample['image'] = grey2rgb(sample_aug[0][0])
