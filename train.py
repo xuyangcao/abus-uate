@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '2,3' 
 import argparse 
 import time 
 import shutil
@@ -24,7 +24,8 @@ from models.resunet import UNet
 from utils.logger import Logger
 from utils.loss import DiceLoss, MaskDiceLoss, MaskMSELoss
 from utils.ramps import sigmoid_rampup #https://github.com/yulequan/UA-MT/blob/master/code/utils/ramps.py
-from dataset.abus_dataset_2d import ABUS_Dataset_2d, ElasticTransform, ToTensor, Normalize
+#from dataset.abus_dataset_2d import ABUS_Dataset_2d, ElasticTransform, ToTensor, Normalize
+from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
 plt.switch_backend('agg')
 
 def get_args():
@@ -40,7 +41,7 @@ def get_args():
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float, metavar='W')
     parser.add_argument('--save')
     parser.add_argument('--opt', type=str, default='adam', choices=('sgd', 'adam', 'rmsprop'))
-    parser.add_argument('--sample_k', '-k', default=50, type=int) #'number of sampled images'
+    parser.add_argument('--sample_k', '-k', default=50, type=int, choices=(50, 120, 487)) #'number of sampled images'
     parser.add_argument('--max_val', default=3, type=float) # maxmum of ramp-up function 
     parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
@@ -54,6 +55,7 @@ def get_args():
     parser.add_argument('--train_target_path', default='./data/train_label_2d/', type=str)
     parser.add_argument('--test_image_path', default='./data/test_data_2d/', type=str)
     parser.add_argument('--test_target_path', default='./data/test_label_2d/', type=str)
+    parser.add_argument('--root_path', default='./data/', type=str)
 
     args = parser.parse_args()
     #torch.cuda.set_device(args.gpu_idx)
@@ -140,14 +142,16 @@ def main():
     ################
     # prepare data #
     ################
-    train_transform = transforms.Compose([ElasticTransform('train'), ToTensor(), Normalize(0.5, 0.5)])
-    test_transform = transforms.Compose([ElasticTransform(mode='test'),ToTensor(), Normalize(0.5, 0.5)])
+    train_transform = transforms.Compose([ElasticTransform('train'), ToTensor(mode='train'), Normalize(0.5, 0.5, mode='train')])
+    test_transform = transforms.Compose([ElasticTransform(mode='test'),ToTensor(mode='test'), Normalize(0.5, 0.5, mode='test')])
 
     # tarin dataset
     print("loading train set --- ")
     kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
-    train_set = ABUS_Dataset_2d(image_path=train_image_path, target_path=train_target_path, transform=train_transform, sample_k=args.sample_k, seed=1)
-    test_set = ABUS_Dataset_2d(image_path=test_image_path, target_path=test_target_path, transform=test_transform, mode='test')
+    #train_set = ABUS_Dataset_2d(image_path=train_image_path, target_path=train_target_path, transform=train_transform, sample_k=args.sample_k, seed=1)
+    #test_set = ABUS_Dataset_2d(image_path=test_image_path, target_path=test_target_path, transform=test_transform, mode='test')
+    train_set = ABUS_2D(base_dir=args.root_path, mode='train', data_num_labeled=args.sample_k, use_unlabeled_data=True, transform=train_transform)
+    test_set = ABUS_2D(base_dir=args.root_path, mode='test', data_num_labeled=None, use_unlabeled_data=False, transform=test_transform)
     #train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, **kwargs)
     test_loader = DataLoader(test_set, batch_size=1, shuffle=True, **kwargs)
 
@@ -188,7 +192,7 @@ def main():
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
-        train_set.training_targets = z # add current training targets to the next iteration
+        train_set.psuedo_target = z # add current training targets to the next iteration
         train_set.uncertain_map = uncertain_map # add current uncertainty map to the next iteration 
         train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, return_index=True, **kwargs) # set return_index==true 
         oukputs, losses, sup_losses, unsup_losses, w, uncertain = train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs)
