@@ -1,4 +1,5 @@
 import os 
+os.environ["CUDA_VISIBLE_DEVICES"] = '0,1' 
 import argparse 
 import time 
 import shutil
@@ -11,8 +12,8 @@ from torch.autograd import Variable
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid
-from tensorboardX import SummaryWriter
-#from torch.utils.tensorboard import SummaryWriter
+#from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from skimage.color import label2rgb 
 from skimage import measure
 import matplotlib.pyplot as plt
@@ -21,7 +22,7 @@ import numpy as np
 from models.denseunet import DenseUnet
 from models.resunet import UNet
 from utils.logger import Logger
-from utils.loss import DiceLoss, SurfaceLoss, TILoss, MaskDiceLoss, MaskMSELoss
+from utils.loss import DiceLoss, MaskDiceLoss, MaskMSELoss
 from utils.ramps import sigmoid_rampup #https://github.com/yulequan/UA-MT/blob/master/code/utils/ramps.py
 from dataset.abus_dataset_2d import ABUS_Dataset_2d, ElasticTransform, ToTensor, Normalize
 plt.switch_backend('agg')
@@ -29,10 +30,10 @@ plt.switch_backend('agg')
 def get_args():
     print('initing args------')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batchsize', type=int, default=16)
+    parser.add_argument('--batchsize', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=1)
-    parser.add_argument('--gpu_idx', default='0', type=str)
-    parser.add_argument('--n_epochs', type=int, default=150)
+    parser.add_argument('--gpu_idx', default=0, type=int)
+    parser.add_argument('--n_epochs', type=int, default=100)
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N')
     parser.add_argument('--resume', default='', type=str, metavar='PATH')
@@ -40,17 +41,13 @@ def get_args():
     parser.add_argument('--save')
     parser.add_argument('--opt', type=str, default='adam', choices=('sgd', 'adam', 'rmsprop'))
     parser.add_argument('--sample_k', '-k', default=50, type=int) #'number of sampled images'
-    parser.add_argument('--max_val', default=1, type=float) # maxmum of ramp-up function 
-    parser.add_argument('--train_method', default='super', choices=('super', 'semisuper'))
+    parser.add_argument('--max_val', default=3, type=float) # maxmum of ramp-up function 
+    parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
-    parser.add_argument('--dice_loss_focus', default=False, action='store_true') # whether use focus dice loss 
-    parser.add_argument('--dice_loss_alpha', default=2., type=float) # set focus dice loss alpha
-    parser.add_argument('--is_unet', default=False, action='store_true')
-    parser.add_argument('--augment', default=False, action='store_true') 
-    parser.add_argument('--max_epochs', default=80, type=float) # max epoch of weight schedualer 
+    parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
     parser.add_argument('--uncertain_map', default='epis', type=str, choices=('epis', 'alec', 'mix', '')) # max epoch of weight schedualer 
     parser.add_argument('--is_uncertain', default=True, action='store_true') # is use uncertainty 
     parser.add_argument('--train_image_path', default='./data/train_data_2d/', type=str)
@@ -59,8 +56,7 @@ def get_args():
     parser.add_argument('--test_target_path', default='./data/test_label_2d/', type=str)
 
     args = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_idx
-    #torch.cuda.set_device(2)
+    #torch.cuda.set_device(args.gpu_idx)
     return args
 
 def main():
@@ -75,7 +71,7 @@ def main():
 
     batch_size = args.ngpu*args.batchsize
     args.cuda = torch.cuda.is_available()
-    args.save = args.save or 'work/vnet.base.{}'.format(datestr())
+    args.save = args.save or 'work/network.base.{}'.format(datestr())
     setproctitle.setproctitle(args.save)
 
     torch.manual_seed(1)
@@ -145,8 +141,6 @@ def main():
     # prepare data #
     ################
     train_transform = transforms.Compose([ElasticTransform('train'), ToTensor(), Normalize(0.5, 0.5)])
-    if args.augment:
-        train_transform = transforms.Compose([ElasticTransform(mode='train'), ToTensor(), Normalize(0.5, 0.5)])
     test_transform = transforms.Compose([ElasticTransform(mode='test'),ToTensor(), Normalize(0.5, 0.5)])
 
     # tarin dataset
@@ -161,20 +155,12 @@ def main():
     # optimizer #
     #############
     lr = args.lr
-    if args.opt == 'sgd':
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=args.weight_decay)
-    elif args.opt == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=args.weight_decay)
-    elif args.opt == 'rmsprop':
-        optimizer = optim.RMSprop(model.parameters(), weight_decay=args.weight_decay)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=args.weight_decay)
 
     # loss function
     loss_fn = {}
-    loss_fn['surface_loss'] = SurfaceLoss()
-    loss_fn['ti_loss'] = TILoss()
     loss_fn['dice_loss'] = DiceLoss()
-    loss_fn['mask_dice_loss'] = MaskDiceLoss(args.dice_loss_focus, args.dice_loss_alpha)
-    loss_fn['mse_loss'] = nn.MSELoss()
+    loss_fn['mask_dice_loss'] = MaskDiceLoss()
     loss_fn['mask_mse_loss'] = MaskMSELoss()
 
     ############
@@ -188,14 +174,14 @@ def main():
     z = torch.zeros(nTrain, 2, width, height).float()
     outputs = torch.zeros(nTrain, 2, width, height).float()
     uncertain_map = torch.zeros(nTrain, 2, width, height).float()  
-    #alpha = args.alpha_psudo
     for epoch in range(args.start_epoch, args.n_epochs + 1):
+        # learning rate
         if args.opt == 'sgd':
-            if (epoch+1) % 20 == 0:
+            if (epoch+1) % 30 == 0:
                 lr *= 0.1
         if args.opt == 'adam':
-            if (epoch+1) % 20 == 0:
-                if (epoch+1) % 40 == 0:
+            if (epoch+1) % 30 == 0:
+                if (epoch+1) % 60 == 0:
                     lr *= 0.2
                 else:
                     lr *= 0.5
@@ -234,7 +220,7 @@ def main():
 
 
 
-def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=3):
+def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=2):
     width = 128 
     height = 512 
     batch_size = args.ngpu * args.batchsize
@@ -254,7 +240,6 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
         data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
         psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)
         
-        # if epoch < 10, then we do not use unsupervised loss
         if args.train_method == 'super':
             cond = target[:, 0, 0, 0] >= 0 # first element of all samples in a batch 
             nnz = torch.nonzero(cond) # get how many labeled samples in a batch 
@@ -272,7 +257,6 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
             out_hat_shape = (T+1,) + out.shape
             temp_out_shape = (1, ) + out.shape
             out_hat = Variable(torch.zeros(out_hat_shape).float().cuda(), requires_grad=False)
-            #out_temp = out.clone()
             out_hat[0] = out.view(temp_out_shape)
             for t in range(T):
                 data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
@@ -281,16 +265,9 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
             aleatoric = torch.mean(out_hat*(1-out_hat), 0)
             epistemic = torch.mean(out_hat**2, 0) - torch.mean(out_hat, 0)**2
             epistemic = (epistemic - epistemic.min()) / (epistemic.max() - epistemic.min())
-            #aleatoric = (aleatoric - aleatoric.min()) / (aleatoric.max() - aleatoric.min())
 
-            #p = torch.mean(out_hat, 0)
-            #pt = p**(1 / T)
-            #print('pt.shape: ', pt.shape)
-            #out_u = pt / pt.sum(dim=1, keepdim=True)
-            #out_u = out_u.detach()
             out_u = out_hat[0]
 
-        #outputs[batch_idx*batch_size:(batch_idx+1)*batch_size] = out.data.clone().cpu()
         for i, j in enumerate(indices):
             outputs[j] = out_u[i].data.clone().cpu()
         if args.uncertain_map == 'epis':
@@ -299,16 +276,13 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
             uncertain_temp = aleatoric
         else:
             uncertain_temp = torch.max(epistemic, aleatoric) 
-        #uncertain_map[batch_idx*batch_size:(batch_idx+1)*batch_size] = uncertain_temp.data.clone().cpu()
         for i, j in enumerate(indices):
             uncertain_map[j] = uncertain_temp[i]
             
         # loss
-        #w = weight_schedule(args, w_max=3000, n_labeled=args.sample_k, n_samples=nTrain, mult=-5, epoch=epoch, max_epochs=args.max_epochs)
         w = args.max_val * sigmoid_rampup(epoch, args.max_epochs)
         w = Variable(torch.FloatTensor([w]).cuda(), requires_grad=False)
 
-        #zcomp = Variable(z[batch_idx*batch_size:(batch_idx+1)*batch_size].cuda(), requires_grad=False)
         zcomp = psuedo_target
         sup_loss, n_sup = loss_fn['mask_dice_loss'](out, target)
 
@@ -336,12 +310,7 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
             partialEpoch, nProcessed, nTrain, 100. * batch_idx / len(train_loader),
             loss.item()))
 
-        #writer.add_scalar('uncertain/epis_max', epistemic.max(), partialEpoch)
-        #writer.add_scalar('uncertain/epis_min', epistemic.min(), partialEpoch)
         writer.add_scalar('uncertain/epis_mean', epistemic.mean(), partialEpoch)
-        #writer.add_scalar('uncertain/alea_max', aleatoric.max(), partialEpoch)
-        #writer.add_scalar('uncertain/alea_min', aleatoric.min(), partialEpoch)
-        writer.add_scalar('uncertain/alea_mean', aleatoric.mean(), partialEpoch)
         writer.add_scalar('uncertain/mask_per', torch.sum(mask) / mask.numel(), partialEpoch)
         writer.add_scalar('uncertain/threshold', threshold, partialEpoch)
 
@@ -519,17 +488,6 @@ def confusion(y_pred, y_true):
 #        nn.init.kaiming_normal_(m.weight)
 #        #m.bias.data.zero_()
 
-def weight_schedule(args, w_max, n_labeled, n_samples, mult, epoch, max_epochs):
-    #max_val = w_max * (float(n_labeled) / n_samples)
-    max_val = args.max_val 
-    # ramp-up 
-    if epoch <= 2:
-        return 0.
-    elif epoch >= max_epochs:
-        return max_val
-    return max_val * np.exp(mult * (1.-float(epoch)/max_epochs)**2)
-
-
 def datestr():
     now = time.gmtime()
     return '{}{:02}{:02}_{:02}{:02}'.format(now.tm_year, now.tm_mon, now.tm_mday, now.tm_hour, now.tm_min)
@@ -540,7 +498,6 @@ def save_checkpoint(state, is_best, path, prefix, filename='checkpoint.pth.tar')
     torch.save(state, name)
     if is_best:
         shutil.copyfile(name, prefix_save + '_model_best.pth.tar')
-
 
 def gaussian_noise(x, batchsize, input_shape=(3, 224, 224), std=0.03):
     noise = torch.zeros(x.shape)
