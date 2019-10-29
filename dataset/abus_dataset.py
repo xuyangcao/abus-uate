@@ -111,6 +111,8 @@ class ABUS_2D(Dataset):
             if self._transform:
                 sample = self._transform(sample)
 
+            # return filename to save result in test set
+            sample['file_name'] = file_name 
         else:
             raise(RuntimeError('mode should be train or test! in __getitem__ !'))
 

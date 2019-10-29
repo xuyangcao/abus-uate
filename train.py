@@ -41,7 +41,7 @@ def get_args():
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float, metavar='W')
     parser.add_argument('--save')
     parser.add_argument('--opt', type=str, default='adam', choices=('sgd', 'adam', 'rmsprop'))
-    parser.add_argument('--sample_k', '-k', default=50, type=int, choices=(50, 120, 487)) #'number of sampled images'
+    parser.add_argument('--sample_k', '-k', default=50, type=int, choices=(50, 120, 487, 974, 2436)) #'number of sampled images'
     parser.add_argument('--max_val', default=3, type=float) # maxmum of ramp-up function 
     parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
