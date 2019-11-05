@@ -41,7 +41,7 @@ def get_args():
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float, metavar='W')
     parser.add_argument('--save')
     parser.add_argument('--opt', type=str, default='adam', choices=('sgd', 'adam', 'rmsprop'))
-    parser.add_argument('--sample_k', '-k', default=50, type=int, choices=(50, 120, 487, 974, 2436)) #'number of sampled images'
+    parser.add_argument('--sample_k', '-k', default=50, type=int, choices=(50, 120, 487, 974, 2436, 4873)) #'number of sampled images'
     parser.add_argument('--max_val', default=3, type=float) # maxmum of ramp-up function 
     parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
@@ -58,6 +58,7 @@ def get_args():
     parser.add_argument('--root_path', default='./data/', type=str)
 
     args = parser.parse_args()
+    print(args.is_uncertain)
     #torch.cuda.set_device(args.gpu_idx)
     return args
 
@@ -165,7 +166,7 @@ def main():
     loss_fn = {}
     loss_fn['dice_loss'] = DiceLoss()
     loss_fn['mask_dice_loss'] = MaskDiceLoss()
-    loss_fn['mask_mse_loss'] = MaskMSELoss()
+    loss_fn['mask_mse_loss'] = MaskMSELoss(args)
 
     ############
     # training #
@@ -295,8 +296,10 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
         
         mask = uncertain_temp < threshold
         mask = mask.float()
-        unsup_loss = loss_fn['mask_mse_loss'](out, zcomp, uncertain_temp, th=threshold)
-        #unsup_loss = F.mse_loss(out, zcomp)
+        if args.is_uncertain:
+            unsup_loss = loss_fn['mask_mse_loss'](out, zcomp, uncertain_temp, th=threshold)
+        else:
+            unsup_loss = F.mse_loss(out, zcomp)
         if args.train_method == 'super':
             loss = sup_loss
         else: 

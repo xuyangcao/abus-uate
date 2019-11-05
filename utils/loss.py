@@ -58,18 +58,21 @@ class MaskDiceLoss(nn.Module):
         return Variable(torch.FloatTensor([0.]).cuda(), requires_grad=False), 0
 
 class MaskMSELoss(nn.Module):
-    def __init__(self):
+    def __init__(self, args):
         super(MaskMSELoss, self).__init__()
+        self.args = args
 
     def forward(self, out, zcomp, uncer, th=0.15):
         # transverse to float 
         out = out.float() # current prediction
         zcomp = zcomp.float() # the psudo label 
         uncer = uncer.float() #current prediction uncertainty
-
-        mask = uncer > th
-        mask = mask.float()
-        mse = torch.sum(mask*(out - zcomp)**2) / torch.sum(mask) 
+        if self.args.is_uncertain:
+            mask = uncer > th
+            mask = mask.float()
+            mse = torch.sum(mask*(out - zcomp)**2) / torch.sum(mask) 
+        else:
+            mse = torch.sum((out - zcomp)**2) / out.numel()
 
         return mse
 
