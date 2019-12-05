@@ -16,6 +16,8 @@ from torchvision.utils import make_grid
 from torch.utils.tensorboard import SummaryWriter
 from skimage.color import label2rgb 
 from skimage import measure
+from skimage.io import imsave
+import cv2
 import matplotlib.pyplot as plt
 import setproctitle
 import numpy as np 
@@ -225,7 +227,7 @@ def main():
 
 
 
-def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=2):
+def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=2, debug=False):
     width = 128 
     height = 512 
     batch_size = args.ngpu * args.batchsize
@@ -325,37 +327,50 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
         with torch.no_grad():
             index = torch.ones(1).long().cuda()
             index0 = torch.zeros(1).long().cuda()
+            padding = 10
             if batch_idx % 10 == 0:
                 # 1. show gt and prediction
                 data = (data * 0.5 + 0.5)
-                img = make_grid(data, padding=20).cpu().detach().numpy().transpose(1, 2, 0)
-                img[img<0] = 0.
-                img[img>1] = 1.
-                gt = make_grid(target, padding=20).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                img = make_grid(data, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) * 255
+                img = img.astype(np.uint8)
+                img_old = img.copy()
+
+                target[target < 0] = 0.
+                if debug and torch.sum(target) != 0:
+                    save_images = True
+                gt = make_grid(target, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                _, contours, _ = cv2.findContours(gt.astype(np.uint8).copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                cv2.drawContours(img, contours, -1, (0, 255, 0), 2)
+
                 pre = torch.max(out, dim=1, keepdim=True)[1]
                 pre = pre.float()
-                pre = make_grid(pre, padding=20).cpu().numpy().transpose(1, 2, 0)[:, :, 0]
-                pre_img = label2rgb(pre, img, bg_label=0)
+                pre = make_grid(pre, nrow=5, padding=padding).cpu().numpy().transpose(1, 2, 0)[:, :, 0]
+                pre_img = label2rgb(pre, img_old, bg_label=0)
+                
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
-                ax.imshow(img)
-                contours = measure.find_contours(gt, 0.5)
-                for contour in contours:
-                    ax.plot(contour[:, 1], contour[:, 0], 'g')
-                ax.set_title('train ground truth')
+                ax.imshow(img, 'gray')
+                ax.set_title('tarin gt')
                 ax = fig.add_subplot(212)
-                ax.imshow(pre_img)
-                ax.set_title('train prediction')
+                ax.imshow(pre_img, 'gray')
+                ax.set_title('tarin pre')
                 fig.tight_layout() 
-                writer.add_figure('train result', fig, epoch)
+
+                writer.add_figure('train-ori-image', fig, epoch)
                 fig.clear()
+                #if save_images:
+                #    filename = 'epoch_{}_batchIdx_{}_ori.png'.format(epoch, batch_idx)
+                #    imsave(os.path.join(args.save, filename), img)
+                #    filename = 'epoch_{}_batchIdx_{}_pre.png'.format(epoch, batch_idx)
+                #    imsave(os.path.join(args.save, filename), pre_img)
 
                 # show uncertainty 
                 #print('epistemic.shape', epistemic.shape)
                 epis = torch.index_select(epistemic, 1, index0)
                 alea = torch.index_select(aleatoric, 1, index)
-                epis = make_grid(epis, padding=20).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                alea = make_grid(alea, padding=20).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                epis = make_grid(epis, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                alea = make_grid(alea, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
                 map_ = ax.imshow(epis, 'hot')
@@ -369,9 +384,16 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 writer.add_figure('train_uncertainty', fig, epoch)
                 fig.clear()
 
+                #if save_images:
+                #    filename = 'epoch_{}_batchIdx_{}_epis.png'.format(epoch, batch_idx)
+                #    epis *= 255
+                #    epis = epis.astype(np.uint8)
+                #    epis_color = cv2.applyColorMap(epis, cv2.COLORMAP_HOT)
+                #    cv2.imwrite(os.path.join(args.save, filename), epis_color)
+
                 # show mask 
                 mask = torch.index_select(mask, 1, index0)
-                mask = make_grid(mask, padding=20).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                mask = make_grid(mask, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
                 map_ = ax.imshow(epis, 'hot')
@@ -386,9 +408,9 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
 
                 # show pseudo label
                 zcomp_ = torch.index_select(zcomp, 1, index)
-                zcomp_ = make_grid(zcomp_, padding=20).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                zcomp_ = make_grid(zcomp_, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 out_ = torch.index_select(out, 1, index)
-                out_ = make_grid(out_, padding=20).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                out_ = make_grid(out_, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
                 map_ = ax.imshow(out_, 'hot', vmin=0.0, vmax=1.0)
@@ -401,6 +423,21 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 fig.tight_layout()
                 writer.add_figure('train pseudo label', fig, epoch)
                 fig.clear()
+
+                # save pseudo labels for visualization
+                #if save_images:
+                #    filename = 'epoch_{}_batchIdx_{}_hot_pre.png'.format(epoch, batch_idx)
+                #    out_ *= 255
+                #    out_ = out_.astype(np.uint8)
+                #    out_color = cv2.applyColorMap(out_, cv2.COLORMAP_HOT)
+                #    cv2.imwrite(os.path.join(args.save, filename), out_color)
+                #    filename = 'epoch_{}_batchIdx_{}_pseudo_label.png'.format(epoch, batch_idx)
+                #    zcomp_ *= 255
+                #    zcomp_ = zcomp_.astype(np.uint8)
+                #    zcomp_color = cv2.applyColorMap(zcomp_, cv2.COLORMAP_HOT)
+                #    cv2.imwrite(os.path.join(args.save, filename), zcomp_color)
+
+                #save_images = False
 
         loss_list.append(loss.item())
         sup_loss_list.append(n_sup*sup_loss.item())

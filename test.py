@@ -19,7 +19,7 @@ from skimage import measure
 import tqdm
 import torch
 plt.switch_backend('agg')
-os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '1' 
 
 
 def get_args():
