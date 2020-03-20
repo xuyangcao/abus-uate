@@ -205,7 +205,6 @@ def main():
             alpha = args.alpha_psudo
         Z = alpha * Z + (1-alpha)*outputs
         z = Z * (1. / (1.-alpha**(epoch+1)))
-
         dice = test(args, epoch, model, test_loader, optimizer, loss_fn, logger, writer)
 
         writer.add_scalar('super_loss/epoch', np.sum(sup_losses)/args.sample_k, epoch)
@@ -373,11 +372,11 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 alea = make_grid(alea, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
-                map_ = ax.imshow(epis, 'hot')
+                map_ = ax.imshow(epis, 'jet')
                 plt.colorbar(map_)
                 ax.set_title('train epistemic uncertainty')
                 ax = fig.add_subplot(212)
-                map_ = ax.imshow(alea, 'hot')
+                map_ = ax.imshow(alea, 'jet')
                 plt.colorbar(map_)
                 ax.set_title('train aleatoric uncertainty')
                 fig.tight_layout()
@@ -396,7 +395,7 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 mask = make_grid(mask, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
-                map_ = ax.imshow(epis, 'hot')
+                map_ = ax.imshow(epis, 'jet')
                 plt.colorbar(map_)
                 ax.set_title('train epistemic uncertainty')
                 ax = fig.add_subplot(212)
@@ -413,11 +412,11 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 out_ = make_grid(out_, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
-                map_ = ax.imshow(out_, 'hot', vmin=0.0, vmax=1.0)
+                map_ = ax.imshow(out_, 'jet', vmin=0.0, vmax=1.0)
                 plt.colorbar(map_)
                 ax.set_title('train current probability')
                 ax = fig.add_subplot(212)
-                map_ = ax.imshow(zcomp_, 'hot', vmin=0.0, vmax=1.0)
+                map_ = ax.imshow(zcomp_, 'jet', vmin=0.0, vmax=1.0)
                 plt.colorbar(map_)
                 ax.set_title('train pseudo label')
                 fig.tight_layout()
