@@ -182,7 +182,7 @@ class ToTensor(object):
         self._mode = mode
     
     def __call__(self, sample):
-        if self._mode == 'train' or self._mode == 'test' or self.mode == 'val':
+        if self._mode == 'train' or self._mode == 'test' or self._mode == 'val':
             image, target = sample['image'], sample['target']
             target = np.expand_dims(target, 0)
             image = image.transpose((2, 0, 1))

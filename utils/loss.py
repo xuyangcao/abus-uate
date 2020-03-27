@@ -45,7 +45,7 @@ class MaskDiceLoss(nn.Module):
         cond = labels[:, 0, 0, 0] >= 0 # first element of all samples in a batch 
         nnz = torch.nonzero(cond) # get how many labeled samples in a batch 
         nbsup = len(nnz)
-        print('labeled samples number:', nbsup)
+        #print('labeled samples number:', nbsup)
         if nbsup > 0:
             masked_outputs = torch.index_select(out, 0, nnz.view(nbsup)) #select all supervised labels along 0 dimention 
             masked_labels = labels[cond]

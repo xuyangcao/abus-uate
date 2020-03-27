@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '2,3' 
 import sys
 import argparse 
 import shutil
@@ -8,6 +8,7 @@ import numpy as np
 import random
 import setproctitle
 import cv2
+import tqdm
 from skimage.color import label2rgb 
 from skimage import measure
 from skimage.io import imsave
@@ -37,7 +38,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root_path', default='../data/', type=str)
 
-    parser.add_argument('--batchsize', type=int, default=5)
+    parser.add_argument('--batchsize', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=2)
     parser.add_argument('--gpu_idx', default=0, type=int)
     parser.add_argument('--seed', default=6, type=int) 
@@ -48,7 +49,7 @@ def get_args():
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
     parser.add_argument('--weight_decay', '--wd', default=1e-4, type=float, metavar='W')
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
-    parser.add_argument('--max_val', default=1, type=float) # maxmum of ramp-up function 
+    parser.add_argument('--max_val', default=1., type=float) # maxmum of ramp-up function 
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
 
     parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
@@ -360,17 +361,23 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 pre = pre.float()
                 pre = make_grid(pre, nrow=5, padding=padding).cpu().numpy().transpose(1, 2, 0)[:, :, 0]
                 pre_img = label2rgb(pre, img_old, bg_label=0)
+
+                epis = torch.index_select(epistemic, 1, index0)
+                #alea = torch.index_select(aleatoric, 1, index)
+                epis = make_grid(epis, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 
                 fig = plt.figure()
-                ax = fig.add_subplot(211)
+                ax = fig.add_subplot(311)
                 ax.imshow(img, 'gray')
                 ax.set_title('tarin gt')
-                ax = fig.add_subplot(212)
+                ax = fig.add_subplot(312)
                 ax.imshow(pre_img, 'gray')
                 ax.set_title('tarin pre')
+                ax = fig.add_subplot(313)
+                ax.imshow(epis, 'jet')
+                ax.set_title('train uncertainty')
                 fig.tight_layout() 
-
-                writer.add_figure('train-ori-image', fig, epoch)
+                writer.add_figure('train_ori_image', fig, epoch)
                 fig.clear()
                 #if save_images:
                 #    filename = 'epoch_{}_batchIdx_{}_ori.png'.format(epoch, batch_idx)
@@ -380,22 +387,22 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
 
                 # show uncertainty 
                 #print('epistemic.shape', epistemic.shape)
-                epis = torch.index_select(epistemic, 1, index0)
-                alea = torch.index_select(aleatoric, 1, index)
-                epis = make_grid(epis, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                alea = make_grid(alea, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                fig = plt.figure()
-                ax = fig.add_subplot(211)
-                map_ = ax.imshow(epis, 'jet')
-                #plt.colorbar(map_)
-                ax.set_title('train epistemic uncertainty')
-                ax = fig.add_subplot(212)
-                map_ = ax.imshow(alea, 'jet')
-                #plt.colorbar(map_)
-                ax.set_title('train aleatoric uncertainty')
-                fig.tight_layout()
-                writer.add_figure('train_uncertainty', fig, epoch)
-                fig.clear()
+                #epis = torch.index_select(epistemic, 1, index0)
+                #alea = torch.index_select(aleatoric, 1, index)
+                #epis = make_grid(epis, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                #alea = make_grid(alea, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                #fig = plt.figure()
+                #ax = fig.add_subplot(211)
+                #map_ = ax.imshow(epis, 'jet')
+                ##plt.colorbar(map_)
+                #ax.set_title('train epistemic uncertainty')
+                #ax = fig.add_subplot(212)
+                #map_ = ax.imshow(alea, 'jet')
+                ##plt.colorbar(map_)
+                #ax.set_title('train aleatoric uncertainty')
+                #fig.tight_layout()
+                #writer.add_figure('train_uncertainty', fig, epoch)
+                #fig.clear()
 
                 #if save_images:
                 #    filename = 'epoch_{}_batchIdx_{}_epis.png'.format(epoch, batch_idx)
@@ -405,19 +412,19 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 #    cv2.imwrite(os.path.join(args.save, filename), epis_color)
 
                 # show mask 
-                mask = torch.index_select(mask, 1, index0)
-                mask = make_grid(mask, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                fig = plt.figure()
-                ax = fig.add_subplot(211)
-                map_ = ax.imshow(epis, 'jet')
-                #plt.colorbar(map_)
-                ax.set_title('train epistemic uncertainty')
-                ax = fig.add_subplot(212)
-                ax.imshow(mask, 'gray')
-                ax.set_title('train mask')
-                fig.tight_layout()
-                writer.add_figure('mask', fig, epoch)
-                fig.clear()
+                #mask = torch.index_select(mask, 1, index0)
+                #mask = make_grid(mask, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                #fig = plt.figure()
+                #ax = fig.add_subplot(211)
+                #map_ = ax.imshow(epis, 'jet')
+                ##plt.colorbar(map_)
+                #ax.set_title('train epistemic uncertainty')
+                #ax = fig.add_subplot(212)
+                #ax.imshow(mask, 'gray')
+                #ax.set_title('train mask')
+                #fig.tight_layout()
+                #writer.add_figure('mask', fig, epoch)
+                #fig.clear()
 
                 # show pseudo label
                 zcomp_ = torch.index_select(zcomp, 1, index)
@@ -425,13 +432,14 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
                 out_ = torch.index_select(out, 1, index)
                 out_ = make_grid(out_, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
                 fig = plt.figure()
-                ax = fig.add_subplot(211)
-                map_ = ax.imshow(out_, 'jet', vmin=0.0, vmax=1.0)
-                #plt.colorbar(map_)
+                ax = fig.add_subplot(311)
+                ax.imshow(out_, 'jet', vmin=0.0, vmax=1.0)
                 ax.set_title('train current probability')
-                ax = fig.add_subplot(212)
-                map_ = ax.imshow(zcomp_, 'jet', vmin=0.0, vmax=1.0)
-                #plt.colorbar(map_)
+                ax = fig.add_subplot(312)
+                ax.imshow(epis, 'jet')
+                ax.set_title('train epistemic uncertainty')
+                ax = fig.add_subplot(313)
+                ax.imshow(zcomp_, 'jet', vmin=0.0, vmax=1.0)
                 ax.set_title('train_pseudo_label')
                 fig.tight_layout()
                 writer.add_figure('train_pseudo_label', fig, epoch)
@@ -467,10 +475,9 @@ def val(args, epoch, model, val_loader, optimizer, loss_fn, writer):
     mean_precision = []
     mean_recall = []
     with torch.no_grad():
-        for sample in val_loader:
+        for sample in tqdm.tqdm(val_loader):
             data, target = sample['image'], sample['target']
-            if args.cuda:
-                data, target = data.cuda(), target.cuda()
+            data, target = data.cuda(), target.cuda()
             data, target = Variable(data), Variable(target, requires_grad=False)
             #target = target.view(target.numel())
 
@@ -505,7 +512,7 @@ def val(args, epoch, model, val_loader, optimizer, loss_fn, writer):
         ax.imshow(pre_img)
         ax.set_title('val_prediction')
         fig.tight_layout() 
-        writer.add_figure('val result', fig, epoch)
+        writer.add_figure('val_result', fig, epoch)
         fig.clear()
 
         writer.add_scalar('val_dice/epoch', np.mean(mean_dice), epoch)
