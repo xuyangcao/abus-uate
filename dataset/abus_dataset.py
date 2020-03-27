@@ -27,7 +27,7 @@ class ABUS_2D(Dataset):
         # read list of train or test images
         if mode == 'train':
             # read labeled training data
-            with open(self._base_dir + 'train.'+ str(data_num_labeled)+'.labeled', 'r') as f:
+            with open(self._base_dir + 'lists/train.'+ str(data_num_labeled)+'.labeled', 'r') as f:
                 self.image_list = f.readlines()
             # remove '\n' at the end of each line of train and test list
             self.image_list = [item.replace('\n', '') for item in self.image_list]
@@ -37,7 +37,7 @@ class ABUS_2D(Dataset):
 
             # if use ublabeled data, asign a 0 to each labeled traing data using a dict
             if use_unlabeled_data:
-                with open(self._base_dir + 'train.' + str(data_num_labeled) + '.unlabeled', 'r') as f:
+                with open(self._base_dir + 'lists/train.' + str(data_num_labeled) + '.unlabeled', 'r') as f:
                     unlabeled_list = f.readlines()
                 unlabeled_list = [item.replace('\n', '') for item in unlabeled_list]
                 for file_name in unlabeled_list:
@@ -54,14 +54,22 @@ class ABUS_2D(Dataset):
                 #print('len(_label_flag): ', len(self._label_flag))
 
         elif mode == 'test':
-            with open(self._base_dir + 'test.labeled', 'r') as f:
+            with open(self._base_dir + 'lists/test.list', 'r') as f:
+                self.image_list = f.readlines()
+            self.image_list = [item.replace('\n', '') for item in self.image_list]
+            # assign a number of 1 to labeled data using a dict
+            for file_name in self.image_list:
+                self._label_flag[file_name] = 1
+
+        elif mode == 'val':
+            with open(self._base_dir + 'lists/val.list', 'r') as f:
                 self.image_list = f.readlines()
             self.image_list = [item.replace('\n', '') for item in self.image_list]
             # assign a number of 1 to labeled data using a dict
             for file_name in self.image_list:
                 self._label_flag[file_name] = 1
         else:
-            raise(RuntimeError('mode should be test or train!'))
+            raise(RuntimeError('mode {} doesn\'t exists!'.format(mode)))
 
 
     def __len__(self):
@@ -88,14 +96,14 @@ class ABUS_2D(Dataset):
             if self._transform:
                 sample = self._transform(sample)
 
-            if self.psuedo_target is None:
-                raise(RuntimeError('self.psuedo_target is None!'))
-            if self.uncertain_map is None:
-                raise(RuntimeError('self.uncertain_temp is None!'))
-            sample['psuedo_target'] = self.psuedo_target[idx]
-            sample['uncertainty'] = self.uncertain_map[idx]
+            if self.psuedo_target is not None:
+                sample['psuedo_target'] = self.psuedo_target[idx]
+                #raise(RuntimeError('self.psuedo_target is None!'))
+            if self.uncertain_map is not None:
+                sample['uncertainty'] = self.uncertain_map[idx]
+                #raise(RuntimeError('self.uncertain_temp is None!'))
 
-        elif self._mode == 'test':
+        elif self._mode == 'test' or self._mode == 'val':
             # get image
             full_image_name = os.path.join(self._base_dir + '/image/', file_name)
             image = ABUS_2D.load_image(full_image_name, is_normalize=False)
@@ -139,7 +147,7 @@ class ElasticTransform(object):
         self._shape = shape
 
     def __call__(self, sample):
-        if self._mode == 'train' or self._mode == 'test':
+        if self._mode == 'train' or self._mode == 'test' or self._mode == 'val':
             image, target = sample['image'], sample['target']
             images = [[image, target]]
 
@@ -161,7 +169,7 @@ class Normalize(object):
         self._std = std
     
     def __call__(self, sample):
-        if self._mode == 'train' or self._mode == 'test':
+        if self._mode == 'train' or self._mode == 'test' or self._mode == 'val':
             image = sample['image']
             image = (image - self._mean) / self._std
 
@@ -174,7 +182,7 @@ class ToTensor(object):
         self._mode = mode
     
     def __call__(self, sample):
-        if self._mode == 'train' or self._mode == 'test':
+        if self._mode == 'train' or self._mode == 'test' or self.mode == 'val':
             image, target = sample['image'], sample['target']
             target = np.expand_dims(target, 0)
             image = image.transpose((2, 0, 1))
