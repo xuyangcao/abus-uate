@@ -6,8 +6,8 @@ from numpy.random import shuffle
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--labeled_num', '-L', type=int, default=50)
-    parser.add_argument('--patient_num', '-S', type=int, default=10)
+    parser.add_argument('--labeled_num', '-L', type=int, default=974)
+    parser.add_argument('--patient_num', '-S', type=int, default=None)
     parser.add_argument('--file', '-F', type=str, default='./train.list')
     args = parser.parse_args()
     return args
