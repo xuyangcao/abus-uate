@@ -48,7 +48,7 @@ def get_args():
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
     parser.add_argument('--weight_decay', '--wd', default=1e-4, type=float, metavar='W')
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
-    parser.add_argument('--max_val', default=3, type=float) # maxmum of ramp-up function 
+    parser.add_argument('--max_val', default=1, type=float) # maxmum of ramp-up function 
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
 
     parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
@@ -58,8 +58,8 @@ def get_args():
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
 
     # frequently change args
-    parser.add_argument('--is_uncertain', default=True, action='store_true') 
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 8856)) 
+    parser.add_argument('--is_uncertain', default=False, action='store_true') 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
     parser.add_argument('--log_dir', default='./log/semi')
     parser.add_argument('--save', default='./work/semi/test')
 
@@ -225,7 +225,7 @@ def main():
         writer.add_scalar('lr/epoch', lr, epoch)
 
         if epoch == 1 or epoch % 5 == 0:
-            dice = val(args, epoch, model, val_loader, optimizer, loss_fn, logger, writer)
+            dice = val(args, epoch, model, val_loader, optimizer, loss_fn, writer)
             # save checkpoint
             is_best = False
             if dice > best_pre:
@@ -460,7 +460,7 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
 
 
 
-def val(args, epoch, model, val_loader, optimizer, loss_fn, logger, writer):
+def val(args, epoch, model, val_loader, optimizer, loss_fn, writer):
     model.eval()
     mean_dice = []
     mean_loss = []

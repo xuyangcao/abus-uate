@@ -1,18 +1,4 @@
-python ./train.py --save ./work/12_02-semi-maxval_0.1-4873 --max_val 0.1 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 4873  # 512x128
-#python ./train.py --save ./work/11_04-120-save-images --max_val 0.1 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 120  # 512x128
-#python ./train.py --save ./work/11_04_semi_maxval_0.1_lr_1e-4_wd_1e-4-50-10cases --max_val 0.1 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 50  # 512x128
-#python ./train.py --save ./work/11_04_semi_maxval_0.1_lr_1e-4_wd_1e-2436 --max_val 0.1 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 2436 # 512x128
-#python ./train.py --save ./work/11_03_semi_maxval_0.1_lr_1e-4_wd_1e-974 --max_val 0.1 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 974 # 512x128
-#python ./train.py --save ./work/11_02_semi_maxval_0.1_lr_1e-4_wd_1e-487 --max_val 0.1 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 487 # 512x128
-#python ./train.py --save ./work/10_31_semi_maxval_1.5_lr_1e-4_wd_1e-2436 --max_val 1.5 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 2436 # 512x128
-#python ./train.py --save ./work/10_28_semi_maxval_3_lr_1e-4_wd_1e-4_487 --max_val 3 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 150 --sample_k 487 # 512x128 
-#python ./train.py --save ./work/10_27_semi_maxval_3_lr_1e-4_wd_1e-4_120  --max_val 3 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 150 --sample_k 120 # 512x128 
-#python ./train.py --save ./work/10_27_semi_maxval_3_lr_1e-4_wd_1e-4_50  --max_val 3 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 150 --sample_k 50 # 512x128 
-#python ./train.py --save ./work/10_25_semi_maxval_3_lr_1e-4_wd_1e-4_974  --max_val 3 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 150 --sample_k 974 # 512x128 
-#python ./train.py --save ./work/10_24_semi_maxval_3_lr_1e-4_wd_1e-4_121  --max_val 3 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense161 --drop_rate 0.3 --max_epochs 40 --n_epochs 150 --sample_k 121 # 512x128 
-#python ./train.py --save ./work/10_23_semi_maxval_3_lr_1e-4_wd_1e-4  --max_val 3 --train_method semisuper --ngpu 2  --batchsize 10 --arch dense201 --drop_rate 0.3 --max_epochs 40 --n_epochs 100 --sample_k 50 # 512x128 
-
-# the following code validate the optimize input size and batch size, we choose input size 512x128, and batch size 10-16
-#python ./train.py --save ./work/10_16_super_dense121_maxval_3_lr_1e-4_drop_0.3_finetune_wd_1e-4_4873 --sample_k 4873 --max_val 3 --train_method super --ngpu 2 --gpu_idx 0,1 --batchsize 10 --arch dense --drop_rate 0.3 --max_epochs 40 --n_epochs 100 # 512x128 
-#python ./train.py --save ./work/10_15_super_dense121_maxval_3_lr_1e-4_drop_0.3_finetune_wd_1e-4_4873 --sample_k 4873 --max_val 3 --train_method super --ngpu 1 --gpu_idx 2,3 --batchsize 10 --arch dense --drop_rate 0.3 --max_epochs 40 --n_epochs 100 # 512x128 
-#python ./train.py --save ./work/10_14_super_dense121_maxval_3_lr_1e-4_drop_0.3_finetune_wd_1e-4_4873 --sample_k 4873 --max_val 3 --train_method super --ngpu 1 --gpu_idx 2,3 --batchsize 10 --arch dense --drop_rate 0.3 --max_epochs 40 --n_epochs 100 # 224x224 
+python ./train.py --save ./work/semi/uate_100 --max_val 0.1 --train_method semisuper --is_uncertain --sample_k 100 
+python ./train.py --save ./work/semi/uate_885 --max_val 0.1 --train_method semisuper --is_uncertain --sample_k 885 
+python ./train.py --save ./work/semi/uate_1770 --max_val 0.1 --train_method semisuper --is_uncertain --sample_k 1770 
+python ./train.py --save ./work/semi/uate_4428 --max_val 0.1 --train_method semisuper --is_uncertain --sample_k 4428 
