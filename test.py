@@ -1,142 +1,191 @@
 import os 
-import argparse
-import time 
+os.environ["CUDA_VISIBLE_DEVICES"] = '1' 
+import tqdm
 import shutil 
+import argparse
+import setproctitle
+import pandas as pd
+import numpy as np 
+from skimage import measure
+from skimage.io import imsave
+import matplotlib.pyplot as plt
+plt.switch_backend('agg')
+
 import torch 
 import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-import setproctitle
-import numpy as np 
+
 from models.denseunet import DenseUnet
-from utils.loss import DiceLoss, MaskDiceLoss, MaskMSELoss
 from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
-from skimage.io import imread, imsave
-from skimage import measure
-import tqdm
-import torch
-plt.switch_backend('agg')
-os.environ["CUDA_VISIBLE_DEVICES"] = '1' 
+from utils.utils import get_metrics, draw_results
 
 
 def get_args():
-    print('initing args------')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batchSz', type=int, default=1)
+    parser.add_argument('--root_path', type=str, default='../data/')
     parser.add_argument('--ngpu', type=int, default=1)
-    parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
-    parser.add_argument('--gpu_idx', default='2', type=str)
-    parser.add_argument('--cuda', action='store_true')
-    parser.add_argument('--resume', default='', type=str, metavar='PATH')
-    parser.add_argument('--save')
-    parser.add_argument('--root_path', default='./data/', type=str)
-    parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
+    parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) 
+
+    '''frequently changed args'''
+    parser.add_argument('--save', default=None, type=str) 
+    parser.add_argument('--resume', type=str)
 
     args = parser.parse_args()
-    args.cuda = torch.cuda.is_available()
-    args.batch_size = args.ngpu*args.batchSz
-    args.save = args.save or 'work/vnet.base.{}'.format(datestr())
-
     return args
 
-def dice_coeficient(output, target):
-    output = output.float()
-    target = target.float()
-    
-    #print(output.shape)
-    #print(target.shape)
-    output = output
-    smooth = 1
-    iflat = output.view(-1)
-    tflat = target.view(-1)
-    #print(iflat.shape)
-    
-    intersection = torch.dot(iflat, tflat)
-    dice = (2. * intersection + smooth) / (iflat.sum() + tflat.sum() + smooth)
-
-    return intersection, iflat.sum()+tflat.sum(), dice 
-
-def test(args, loader, model):
-    model.eval()
-    dice_list = []
-    sum_list = []
-    inter_list = []
-
-    dice_per_case_list = []
-    sum_per_case_list = []
-    inter_per_case_list = []
-    with torch.no_grad():
-        print(model.training)
-        for num, sample in tqdm.tqdm(enumerate(loader)):
-            data, target, file_name = sample['image'], sample['target'], sample['file_name']
-            if args.cuda:
-                data, target = data.cuda(), target.cuda()
-            data, target = Variable(data), Variable(target)
-            output = model(data)
-            output = F.softmax(output, dim=1) 
-            #print('output.shape:', output.shape)
-            #print('target.shape:', target.shape)
-            output = output.max(1)[1]
-            inter, sum_, dice = dice_coeficient(output, target)
-            dice_list.append(dice.item())
-            inter_list.append(inter.item())
-            sum_list.append(sum_.item())
-            
-            for i in range(output.shape[0]):
-                result = output[i]
-                inter_per, sum_per, dice_per_case = dice_coeficient(result, target[i])
-                dice_per_case_list.append(dice_per_case.item())
-                inter_per_case_list.append(inter_per.item())
-                sum_per_case_list.append(sum_per.item())
-                result = result.view(data.shape[2], data.shape[3]).cpu().numpy().astype(np.uint8)
-                imsave(os.path.join(args.save, file_name[i]), result*255)
             
 def main():
-    args = get_args()
-    setproctitle.setproctitle(args.save)
 
+    # --- init args ---
+    args = get_args()
+
+    # --- saving path ---
+    if 'best' in args.resume:
+        file_name = 'model_best_result'
+    elif 'check' in args.resume:
+        file_name = 'checkpoint_result'
+    else:
+        raise(RuntimeError('Error in args.resume'))
+    csv_file_name = file_name + '.xlsx'
+
+    if args.save is not None:
+        save_path = os.path.join(args.save, file_name) 
+        csv_path = os.save
+    else:
+        save_path = os.path.join(os.path.dirname(args.resume), file_name)
+        csv_path = os.path.dirname(args.resume)
+    args.save_path = save_path
+    args.csv_file_name = os.path.join(csv_path, csv_file_name) 
+    print('=> saving images in :', args.save_path)
+    print('=> saving csv in :', args.csv_file_name)
+
+    if os.path.exists(args.save_path):
+        shutil.rmtree(args.save_path)
+    os.makedirs(args.save_path, exist_ok=True)
+    setproctitle.setproctitle(args.save_path)
+
+
+    # --- building network ---
     if args.arch == 'dense121': 
-        model = DenseUnet(arch='121', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
+        model = DenseUnet(arch='121', pretrained=True, num_classes=2)
     elif args.arch == 'dense161': 
-        model = DenseUnet(arch='161', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
+        model = DenseUnet(arch='161', pretrained=True, num_classes=2)
     elif args.arch == 'dense201': 
-        model = DenseUnet(arch='201', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
+        model = DenseUnet(arch='201', pretrained=True, num_classes=2)
     elif args.arch == 'resunet': 
         model = ResUNet(in_ch=3, num_classes=2, relu=False)
     elif args.arch == 'unet': 
         model = UNet(n_channels=3, n_classes=2)
     else:
         raise(RuntimeError('error in building network!'))
+
+    model = model.cuda()
     model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
 
+
+    # --- resume trained weights ---
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
+            best_pre = checkpoint['best_pre']
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
-        print('resume is None!')
-        return 
-    if args.cuda:
-        model = model.cuda()
-    if os.path.exists(args.save):
-        shutil.rmtree(args.save)
-    os.makedirs(args.save, exist_ok=True)
+        raise(RuntimeError('resume is None!'))
 
-    kwargs = {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
-    test_transform = transforms.Compose([ElasticTransform(mode='test'),ToTensor(mode='test'), Normalize(0.5, 0.5, mode='test')])
-    test_set = ABUS_2D(base_dir=args.root_path, mode='test', data_num_labeled=None, use_unlabeled_data=False, transform=test_transform)
+
+    # --- preparing dataset
+    test_transform = transforms.Compose([
+                            ElasticTransform(mode='test'),
+                            ToTensor(mode='test'), 
+                            Normalize(0.5, 0.5, mode='test')
+                            ])
+    test_set = ABUS_2D(base_dir=args.root_path, 
+                       mode='test', 
+                       data_num_labeled=None, 
+                       use_unlabeled_data=False, 
+                       transform=test_transform)
+    def worker_init_fn(worker_id):
+        random.seed(args.seed+worker_id)
+    kwargs = {'num_workers': 0, 'pin_memory': True, 'worker_init_fn': worker_init_fn}
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False, **kwargs)
 
+
+    # --- testing ---
     test(args, test_loader, model)
+
+def test(args, loader, model):
+    model.eval()
+    
+    dsc_list = []
+    jc_list = []
+    hd_list = []
+    hd95_list = []
+    precision_list = []
+    recall_list = []
+    acc_list = []
+    filename_list = []
+
+    with torch.no_grad():
+        for sample in tqdm.tqdm(loader):
+            image, label, file_name = sample['image'], sample['target'], sample['file_name']
+
+            image = image.cuda()
+            pred = model(image)
+            pred = F.softmax(pred, dim=1) 
+            pred = pred.max(1)[1]
+
+            image = image[0][0].cpu().numpy()
+            image = image * 0.5 + 0.5
+
+            label = label[0][0].cpu().numpy()
+            label = label.astype(np.float)
+            pred = pred[0].cpu().numpy()
+            perd = pred.astype(np.float)
+
+            # get metrics
+            metrics = get_metrics(pred, label, voxelspacing=(0.21, 0.21)) 
+            dsc_list.append(metrics['dsc'])
+            jc_list.append(metrics['jc'])
+            hd95_list.append(metrics['hd95'])
+            acc_list.append(metrics['acc'])
+            hd_list.append(metrics['hd'])
+            precision_list.append(metrics['precision'])
+            recall_list.append(metrics['recall'])
+            filename_list.append(file_name[0]) # ['filename']
+
+            # save images
+            image *= 255
+            image = image.astype(np.uint8)
+            label *= 255
+            label = label.astype(np.uint8)
+            pred *= 255
+            pred = pred.astype(np.uint8)
+
+            image = draw_results(image, label, pred)
+            imsave(os.path.join(args.save_path, file_name[0]), image)
+            #break # debug
+            
+
+        # --- save statistic result ---
+        df = pd.DataFrame()
+        df['filename'] = filename_list
+        df['dsc'] = np.array(dsc_list)
+        df['jc'] = np.array(jc_list)
+        df['hd95'] = np.array(hd95_list)
+        df['acc'] = np.array(acc_list)
+        print(df.describe())
+        df['hd'] = np.array(hd_list)
+        df['precision'] = np.array(precision_list)
+        df['recall'] = np.array(recall_list)
+        df.to_excel(args.csv_file_name)
 
 if __name__ == '__main__':
     main()

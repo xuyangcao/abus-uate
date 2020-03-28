@@ -1,4 +1,5 @@
 import os
+import cv2
 import sys
 import time
 import torch
@@ -7,6 +8,18 @@ import logging
 import importlib
 from medpy import metric
 import numpy as np
+from skimage.transform import resize
+
+def draw_results(img, label, pred):
+    _, contours, _ = cv2.findContours(label, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    cv2.drawContours(img, contours, -1, (0, 255, 0), 2)
+
+    pred = resize(pred, label.shape).astype(label.dtype)
+    _, contours, _ = cv2.findContours(pred, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    cv2.drawContours(img, contours, -1, (255, 0, 0), 2)
+
+    return img
 
 def save_checkpoint(state, is_best, path, prefix, filename='checkpoint.pth.tar'):
     prefix_save = os.path.join(path, prefix)
@@ -15,30 +28,6 @@ def save_checkpoint(state, is_best, path, prefix, filename='checkpoint.pth.tar')
     if is_best:
         shutil.copyfile(name, prefix_save + '_model_best.pth.tar')
 
-def confusion(y_pred, y_true):
-    '''
-    get precision and recall
-    '''
-    y_pred = y_pred.float().view(-1) 
-    y_true = y_true.float().view(-1)
-    #print('y_pred.shape', y_pred.shape)
-    #print('y_true.shape', y_true.shape)
-    smooth = 1. 
-    #y_pred_pos = np.clip(y_pred, 0, 1)
-    y_pred_pos = y_pred
-    y_pred_neg = 1 - y_pred_pos
-    #y_pos = np.clip(y_true, 0, 1)
-    y_pos = y_true
-    y_neg = 1 - y_true
-
-    tp = torch.dot(y_pos, y_pred_pos)
-    fp = torch.dot(y_neg, y_pred_pos)
-    fn = torch.dot(y_pos, y_pred_neg)
-
-    prec = (tp + smooth) / (tp + fp + smooth)
-    recall = (tp + smooth) / (tp + fn + smooth)
-
-    return prec, recall
 
 def gaussian_noise(x, batchsize, input_shape=(3, 224, 224), std=0.03):
     noise = torch.zeros(x.shape)
@@ -50,50 +39,52 @@ def datestr():
     return '{}{:02}{:02}_{:02}{:02}'.format(now.tm_year, now.tm_mon, now.tm_mday, now.tm_hour, now.tm_min)
 
 
-def get_metrics(pred, gt, voxelspacing=(0.5, 0.5, 0.5)):
+def get_metrics(pred, gt, voxelspacing=(0.21, 0.21)):
     r""" 
     Get statistic metrics of segmentation
 
     These metrics include: Dice, Jaccard, Hausdorff Distance, 95% Hausdorff Distance, 
-    and Average surface distance(ASD) metric.
+    , Pixel Wise Accuracy, Precision and Recall.
 
-    If the prediction result is 0s, we set hd, hd95, asd 10.0 to avoid errors.
+    If the prediction result is 0s, we set hd, hd95, 10.0 to avoid errors.
 
     Parameters:
     -----------
-    pred: 3D numpy ndarray
-        binary prediction results 
 
-    gt: 3D numpy ndarray
-        binary ground truth
+        pred: 2D numpy ndarray
+            binary prediction results 
 
-    voxelspacing: tuple of 3 floats. default: (0.5, 0.5, 0.5)
-        voxel space of 3D image
+        gt: 2D numpy ndarray
+            binary ground truth
+
+        voxelspacing: tuple of 2 floats. default: (0.21, 0.21)
+            voxel space of 2D image
 
     Returns:
     --------
-    metrics: dict of 5 metrics 
-        dict{dsc, jc, hd, hd95, asd}
+
+        metrics: dict of 7 metrics 
+            dict{dsc, jc, hd, hd95, precision, recall, acc}
+
     """
 
     dsc = metric.binary.dc(pred, gt)
     jc = metric.binary.jc(pred, gt)
-    vs = np.sum(gt) * voxelspacing[0] * voxelspacing[1] * voxelspacing[2]
     precision = metric.binary.precision(pred, gt)
     recall = metric.binary.recall(pred, gt)
 
+    acc = (pred == gt).sum() / len(gt.flatten())
+
     if np.sum(pred) == 0:
-        print('=> prediction is 0s! ')
-        hd = 32.
-        hd95 = 32.
-        asd = 10.
+        #print('=> prediction is 0s! ')
+        hd = 10 
+        hd95 = 10
     else:
         hd = metric.binary.hd(pred, gt, voxelspacing=voxelspacing)
         hd95 = metric.binary.hd95(pred, gt, voxelspacing=voxelspacing)
-        asd = metric.binary.asd(pred, gt, voxelspacing=voxelspacing)
 
-    metrics = {'dsc': dsc, 'jc': jc, 'hd': hd, 'hd95': hd95, 'asd': asd, 
-                'precision':precision, 'recall':recall, 'vs': vs} 
+    metrics = {'dsc': dsc, 'jc': jc, 'hd': hd, 'hd95': hd95, 
+                'precision':precision, 'recall':recall, 'acc':acc} 
     return metrics 
 
 def get_dice(pred, gt):
