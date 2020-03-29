@@ -32,6 +32,7 @@ def get_args():
     '''frequently changed args'''
     parser.add_argument('--save', default=None, type=str) 
     parser.add_argument('--resume', type=str)
+    parser.add_argument('--save_image', action='store_true')
 
     args = parser.parse_args()
     return args
@@ -132,6 +133,7 @@ def test(args, loader, model):
     recall_list = []
     acc_list = []
     filename_list = []
+    area_list = []
 
     with torch.no_grad():
         for sample in tqdm.tqdm(loader):
@@ -160,18 +162,20 @@ def test(args, loader, model):
             precision_list.append(metrics['precision'])
             recall_list.append(metrics['recall'])
             filename_list.append(file_name[0]) # ['filename']
+            area_list.append(np.sum(label))
 
-            # save images
-            image *= 255
-            image = image.astype(np.uint8)
-            label *= 255
-            label = label.astype(np.uint8)
-            pred *= 255
-            pred = pred.astype(np.uint8)
+            if args.save_image:
+                # save images
+                image *= 255
+                image = image.astype(np.uint8)
+                label *= 255
+                label = label.astype(np.uint8)
+                pred *= 255
+                pred = pred.astype(np.uint8)
 
-            image = draw_results(image, label, pred)
-            imsave(os.path.join(args.save_path, file_name[0]), image)
-            #break # debug
+                image = draw_results(image, label, pred)
+                imsave(os.path.join(args.save_path, file_name[0]), image)
+                #break # debug
             
 
         # --- save statistic result ---
@@ -185,6 +189,7 @@ def test(args, loader, model):
         df['hd'] = np.array(hd_list)
         df['precision'] = np.array(precision_list)
         df['recall'] = np.array(recall_list)
+        df['area'] = np.array(area_list)
         df.to_excel(args.csv_file_name)
 
 if __name__ == '__main__':

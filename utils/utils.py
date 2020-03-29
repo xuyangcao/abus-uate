@@ -10,6 +10,27 @@ from medpy import metric
 import numpy as np
 from skimage.transform import resize
 
+def confusion(y_pred, y_true):
+    '''
+    get precision and recall
+    '''
+    y_pred = y_pred.float().view(-1) 
+    y_true = y_true.float().view(-1)
+    smooth = 1. 
+    y_pred_pos = y_pred
+    y_pred_neg = 1 - y_pred_pos
+    y_pos = y_true
+    y_neg = 1 - y_true
+
+    tp = torch.dot(y_pos, y_pred_pos)
+    fp = torch.dot(y_neg, y_pred_pos)
+    fn = torch.dot(y_pos, y_pred_neg)
+
+    prec = (tp + smooth) / (tp + fp + smooth)
+    recall = (tp + smooth) / (tp + fn + smooth)
+
+    return prec, recall
+
 def draw_results(img, label, pred):
     _, contours, _ = cv2.findContours(label, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
