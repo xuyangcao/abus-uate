@@ -60,7 +60,7 @@ def get_args():
 
     # frequently change args
     parser.add_argument('--is_uncertain', default=False, action='store_true') 
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
     parser.add_argument('--log_dir', default='./log/semi')
     parser.add_argument('--save', default='./work/semi/test')
 
@@ -194,8 +194,8 @@ def main():
     uncertain_map = torch.zeros(nTrain, 2, width, height).float()  
     for epoch in range(args.start_epoch, args.n_epochs + 1):
         # learning rate
-        if epoch % 30 == 0:
-            if epoch % 60 == 0:
+        if epoch % 25 == 0:
+            if epoch % 50 == 0:
                 lr *= 0.2
             else:
                 lr *= 0.5
@@ -238,6 +238,17 @@ def main():
                               is_best, 
                               args.save, 
                               args.arch)
+
+        if epoch == 30 or epoch == 40:
+            if_best = False
+            best_pre = dice
+            save_checkpoint({'epoch': epoch,
+                             'state_dict': model.state_dict(),
+                             'best_pre': best_pre},
+                              is_best, 
+                              args.save, 
+                              args.arch)
+
     writer.close()
 
 
