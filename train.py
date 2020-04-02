@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument('--gpu_idx', default=0, type=int)
     parser.add_argument('--seed', default=6, type=int) 
 
-    parser.add_argument('--n_epochs', type=int, default=100)
+    parser.add_argument('--n_epochs', type=int, default=60)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
@@ -60,7 +60,7 @@ def get_args():
 
     # frequently change args
     parser.add_argument('--is_uncertain', default=False, action='store_true') 
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
     parser.add_argument('--log_dir', default='./log/semi')
     parser.add_argument('--save', default='./work/semi/test')
 
@@ -232,22 +232,13 @@ def main():
             if dice > best_pre:
                 is_best = True
                 best_pre = dice
-            save_checkpoint({'epoch': epoch,
-                             'state_dict': model.state_dict(),
-                             'best_pre': best_pre},
-                              is_best, 
-                              args.save, 
-                              args.arch)
-
-        if epoch == 30 or epoch == 40:
-            if_best = False
-            best_pre = dice
-            save_checkpoint({'epoch': epoch,
-                             'state_dict': model.state_dict(),
-                             'best_pre': best_pre},
-                              is_best, 
-                              args.save, 
-                              args.arch)
+            if is_best or epoch % 10 == 0:
+                save_checkpoint({'epoch': epoch,
+                                 'state_dict': model.state_dict(),
+                                 'best_pre': best_pre},
+                                  is_best, 
+                                  args.save, 
+                                  args.arch)
 
     writer.close()
 

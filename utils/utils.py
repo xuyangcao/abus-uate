@@ -43,6 +43,7 @@ def draw_results(img, label, pred):
     return img
 
 def save_checkpoint(state, is_best, path, prefix, filename='checkpoint.pth.tar'):
+    filename = 'checkpoint_' + str(state['epoch']) + '.pth.tar'
     prefix_save = os.path.join(path, prefix)
     name = prefix_save + '_' + filename
     torch.save(state, name)

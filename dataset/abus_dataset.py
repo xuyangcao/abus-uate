@@ -23,6 +23,10 @@ class ABUS_2D(Dataset):
         self._label_flag = {}
         self.psuedo_target = psuedo_target
         self.uncertain_map = uncertain_map
+        if data_num_labeled == 8856:
+            self.use_unlabeled_data = False
+        else:
+            self.use_unlabeled_data = use_unlabeled_data
 
         # read list of train or test images
         if mode == 'train':
@@ -36,7 +40,7 @@ class ABUS_2D(Dataset):
                 self._label_flag[file_name] = 1
 
             # if use ublabeled data, asign a 0 to each labeled traing data using a dict
-            if use_unlabeled_data:
+            if self.use_unlabeled_data:
                 with open(self._base_dir + 'lists/train.' + str(data_num_labeled) + '.unlabeled', 'r') as f:
                     unlabeled_list = f.readlines()
                 unlabeled_list = [item.replace('\n', '') for item in unlabeled_list]
