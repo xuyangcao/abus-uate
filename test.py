@@ -43,30 +43,6 @@ def main():
     # --- init args ---
     args = get_args()
 
-    # --- saving path ---
-    if 'best' in args.resume:
-        file_name = 'model_best_result'
-    elif 'check' in args.resume:
-        file_name = 'checkpoint_result'
-    else:
-        raise(RuntimeError('Error in args.resume'))
-    csv_file_name = file_name + '.xlsx'
-
-    if args.save is not None:
-        save_path = os.path.join(args.save, file_name) 
-        csv_path = os.save
-    else:
-        save_path = os.path.join(os.path.dirname(args.resume), file_name)
-        csv_path = os.path.dirname(args.resume)
-    args.save_path = save_path
-    args.csv_file_name = os.path.join(csv_path, csv_file_name) 
-    print('=> saving images in :', args.save_path)
-    print('=> saving csv in :', args.csv_file_name)
-
-    if os.path.exists(args.save_path):
-        shutil.rmtree(args.save_path)
-    os.makedirs(args.save_path, exist_ok=True)
-    setproctitle.setproctitle(args.save_path)
 
 
     # --- building network ---
@@ -96,6 +72,30 @@ def main():
             best_pre = checkpoint['best_pre']
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
+
+            # --- saving path ---
+            if 'best' in args.resume:
+                file_name = 'model_best_' + str(checkpoint['epoch'])
+            elif 'check' in args.resume:
+                file_name = 'checkpoint_{}_result'.format(checkpoint['epoch'])
+
+            if args.save is not None:
+                save_path = os.path.join(args.save, file_name) 
+                csv_path = os.save
+            else:
+                save_path = os.path.join(os.path.dirname(args.resume), file_name)
+                csv_path = os.path.dirname(args.resume)
+            args.save_path = save_path
+            csv_file_name = file_name + '.xlsx'
+            args.csv_file_name = os.path.join(csv_path, csv_file_name) 
+            print('=> saving images in :', args.save_path)
+            print('=> saving csv in :', args.csv_file_name)
+
+            if os.path.exists(args.save_path):
+                shutil.rmtree(args.save_path)
+            os.makedirs(args.save_path, exist_ok=True)
+            setproctitle.setproctitle(args.save_path)
+
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
