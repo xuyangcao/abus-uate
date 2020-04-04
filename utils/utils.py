@@ -10,6 +10,41 @@ from medpy import metric
 import numpy as np
 from skimage.transform import resize
 
+
+
+def one_hot(gt):
+    gt = gt.long()
+    gt_one_hot = torch.eye(2)[gt]
+    gt_one_hot = gt_one_hot.permute(0, 3, 1, 2).float()
+    if gt.cuda:
+        gt_one_hot = gt_one_hot.cuda()
+
+    return gt_one_hot
+
+def get_labeled_data(data, labels):
+        cond = labels[:, 0, 0, 0] >= 0 # first element of all samples in a batch 
+        nnz = torch.nonzero(cond) # get how many labeled samples in a batch 
+        nbsup = len(nnz)
+        #print('labeled samples number:', nbsup)
+        if nbsup > 0:
+            masked_data = data[cond]
+            masked_labels = labels[cond]
+            return masked_data, masked_labels
+        else:
+            return None, None
+    
+def get_unlabeled_data(data, labels):
+        cond = labels[:, 0, 0, 0] < 0
+        nnz = torch.nonzero(cond)
+        nbsup = len(nnz)
+        if nbsup > 0:
+            masked_data = data[cond]
+            masked_labels = labels[cond]
+            return masked_data, masked_labels
+        else:
+            return None, None
+
+
 def confusion(y_pred, y_true):
     '''
     get precision and recall

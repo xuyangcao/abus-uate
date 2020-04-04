@@ -16,13 +16,14 @@ __all__ = ['ElasticTransform', 'Normalize', 'ToTensor', 'ABUS_2D']
 
 
 class ABUS_2D(Dataset):
-    def __init__(self, base_dir=None, mode='train', use_unlabeled_data=True, data_num_labeled=None, transform=None, psuedo_target=None, uncertain_map=None):
+    def __init__(self, base_dir=None, mode='train', use_labeled_data=True, use_unlabeled_data=True, data_num_labeled=None, transform=None, psuedo_target=None, uncertain_map=None):
         self._base_dir = base_dir
         self._transform = transform
         self._mode = mode
         self._label_flag = {}
         self.psuedo_target = psuedo_target
         self.uncertain_map = uncertain_map
+        self.use_labeled_data = use_labeled_data
         if data_num_labeled == 8856:
             self.use_unlabeled_data = False
         else:
@@ -30,14 +31,17 @@ class ABUS_2D(Dataset):
 
         # read list of train or test images
         if mode == 'train':
-            # read labeled training data
-            with open(self._base_dir + 'lists/train.'+ str(data_num_labeled)+'.labeled', 'r') as f:
-                self.image_list = f.readlines()
-            # remove '\n' at the end of each line of train and test list
-            self.image_list = [item.replace('\n', '') for item in self.image_list]
-            # assign a number of 1 to labeled training data using a dict
-            for file_name in self.image_list:
-                self._label_flag[file_name] = 1
+            if self.use_labeled_data:
+                # read labeled training data
+                with open(self._base_dir + 'lists/train.'+ str(data_num_labeled)+'.labeled', 'r') as f:
+                    self.image_list = f.readlines()
+                # remove '\n' at the end of each line of train and test list
+                self.image_list = [item.replace('\n', '') for item in self.image_list]
+                # assign a number of 1 to labeled training data using a dict
+                for file_name in self.image_list:
+                    self._label_flag[file_name] = 1
+            else:
+                self.image_list = []
 
             # if use ublabeled data, asign a 0 to each labeled traing data using a dict
             if self.use_unlabeled_data:
@@ -49,13 +53,11 @@ class ABUS_2D(Dataset):
                 self.image_list = self.image_list + unlabeled_list
 
 
-                num = 0
-                for file_name in self.image_list:
-                    num += self._label_flag[file_name]
-                print('number of labeled image is: ', num)
-                print('number of unlabeled image is: ', self.__len__() - num)
-                #print('len(image_list): ', len(self.image_list))
-                #print('len(_label_flag): ', len(self._label_flag))
+            num = 0
+            for file_name in self.image_list:
+                num += self._label_flag[file_name]
+            print('number of labeled image is: ', num)
+            print('number of unlabeled image is: ', self.__len__() - num)
 
         elif mode == 'test':
             with open(self._base_dir + 'lists/test.list', 'r') as f:
