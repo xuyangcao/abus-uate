@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '2,3' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '0,1' 
 import sys
 import argparse 
 import shutil
@@ -74,6 +74,7 @@ def make_D_label(label, ignore_mask):
     ignore_mask = np.expand_dims(ignore_mask, axis=1)
     D_label = np.ones(ignore_mask.shape)*label
     D_label[ignore_mask] = 255
+    #D_label[ignore_mask] = 1 
     D_label = Variable(torch.FloatTensor(D_label)).cuda()
 
     return D_label
@@ -171,8 +172,8 @@ def main():
                        use_unlabeled_data=False, 
                        transform=val_transform
                        )
-    batch_size_label = round(args.ngpu * args.batchsize * 0.1)
-    batch_size_unlabel = args.ngpu * args.batchsize - batch_size_label
+    batch_size_label = round(args.ngpu * args.batchsize * 0.1) # labeled images in a batch
+    batch_size_unlabel = args.ngpu * args.batchsize - batch_size_label # unlabeled images
     def worker_init_fn(worker_id):
         random.seed(args.seed+worker_id)
     kwargs = {'num_workers': 0, 'pin_memory': True, 'worker_init_fn': worker_init_fn} 
@@ -282,26 +283,32 @@ def train(args, epoch, model, model_D, train_loader_unlabel, train_loader_label,
 
         D_out_sigmoid = torch.sigmoid(D_out).data.cpu().numpy().squeeze(axis=1)
         ignore_mask_remain = np.zeros(D_out_sigmoid.shape).astype(np.bool)
+
+        #print('dlabel: ', make_D_label(args.gt_label, ignore_mask_remain).max())
+        #print('dlabel: min', make_D_label(args.gt_label, ignore_mask_remain).min())
         loss_semi_adv = args.lambda_semi_adv * loss_fn['bce_loss'](D_out, make_D_label(args.gt_label, ignore_mask_remain))
-        loss_semi_adv_list.append(loss_semi_adv.item()/args.lambda_semi_adv)
+        loss_semi_adv_list.append(loss_semi_adv.item())
+        #print('loss_semi_adv: ', loss_semi_adv.item())
 
         if args.lambda_semi <= 0 or epoch < args.semi_start:
             loss_semi_adv.backward()
             loss_semi_list.append(0)
         else:
             # produce ignore mask
-            semi_ignore_mask = (D_out_sigmoid < args.mask_T)
+            semi_ignore_mask = (D_out_sigmoid < args.mask_T) # get regions we want to ignore
             semi_gt = pred.data.cpu().numpy().argmax(axis=1)
-            semi_gt[semi_ignore_mask] = 255
+            semi_gt[semi_ignore_mask] = 255 # set regions with 255 if we want to ignore
+
+            # remain pixels that can be used for semi-supervised learning
             semi_ratio = 1.0 - float(semi_ignore_mask.sum())/semi_ignore_mask.size
             print('semi ratio: {:.4f}'.format(semi_ratio))
             if semi_ratio == 0.0:
                 loss_semi_list.append(0)
             else:
-                #print('haha')
+                # semi_gt contains 0, 1, 255
                 semi_gt = torch.FloatTensor(semi_gt)
                 loss_semi = args.lambda_semi * loss_fn['calc'](pred, semi_gt)
-                loss_semi_list.append(loss_semi.item()/args.lambda_semi)
+                loss_semi_list.append(loss_semi.item())
                 loss_semi +=  loss_semi_adv
                 loss_semi.backward()
 
@@ -316,11 +323,10 @@ def train(args, epoch, model, model_D, train_loader_unlabel, train_loader_label,
         images, target = sample['image'], sample['target'] 
         target = target.squeeze(axis=1)
         images = Variable(images).cuda()
-        ignore_mask = (target.numpy() == 1)
+        ignore_mask = (target.numpy() == 255) # this line means we don't ignores any pixel
         pred = model(images) 
 
-        #print('target.shape: ', target.shape)
-        loss_seg = loss_fn['calc'](pred, target)
+        loss_seg = loss_fn['dice_loss'](target.unsqueeze(1), F.softmax(pred, dim=1))
         D_out = interp(model_D(F.softmax(pred, dim=1)))
         loss_adv_pred = loss_fn['bce_loss'](D_out, make_D_label(args.gt_label, ignore_mask))
         loss = loss_seg + args.lambda_adv_pred * loss_adv_pred
@@ -346,7 +352,7 @@ def train(args, epoch, model, model_D, train_loader_unlabel, train_loader_label,
         # train with gt
         labels_gt = target
         D_gt_v = Variable(one_hot(labels_gt)).cuda()
-        ignore_mask_gt = (labels_gt.numpy() == 1)
+        ignore_mask_gt = (labels_gt.numpy() == 255) # means we don't ignore anything
         D_out = interp(model_D(D_gt_v))
         loss_D = loss_fn['bce_loss'](D_out, make_D_label(args.gt_label, ignore_mask_gt))
         loss_D = loss_D / 2.
@@ -361,7 +367,34 @@ def train(args, epoch, model, model_D, train_loader_unlabel, train_loader_label,
         partialEpoch = epoch + batch_idx / len(train_loader_unlabel)
         logging.info('Train Epoch: {:.2f} [{}/{} ({:.0f}%)]\tLoss: {:.8f}'.format(
             partialEpoch, nProcessed, nTrain, 100. * batch_idx / len(train_loader_unlabel),
-            loss.item()))
+            loss_D.item()))
+
+
+        with torch.no_grad():
+            padding = 10
+            if batch_idx % 10 == 0:
+                # 1. show gt and prediction
+                data = (data * 0.5 + 0.5)
+                img = make_grid(data, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) * 255
+                img = img.astype(np.uint8)
+                img_old = img.copy()
+
+                pre = torch.max(pred_remain, dim=1, keepdim=True)[1]
+                pre = pre.float()
+                pre = make_grid(pre, nrow=5, padding=padding).cpu().numpy().transpose(1, 2, 0)[:, :, 0]
+                pre_img = label2rgb(pre, img_old, bg_label=0)
+
+                fig = plt.figure()
+                ax = fig.add_subplot(211)
+                ax.imshow(img, 'gray')
+                ax.set_title('tarin gt')
+                ax = fig.add_subplot(212)
+                ax.imshow(pre_img, 'gray')
+                ax.set_title('tarin pre')
+                fig.tight_layout() 
+                writer.add_figure('train_ori_image', fig, epoch)
+                fig.clear()
 
     writer.add_scalar('gan/loss_seg', np.mean(loss_seg_list), epoch)
     writer.add_scalar('gan/loss_adv_pred_list', np.mean(loss_adv_pred_list), epoch)
