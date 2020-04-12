@@ -55,10 +55,10 @@ def get_args():
 
     # args for semi_gan
     parser.add_argument('--semi_start', default=3, type=int)
-    parser.add_argument('--lambda_semi', default=0.1, type=int)
+    parser.add_argument('--lambda_semi', default=0.001, type=int)
     parser.add_argument('--semi_start_adv', default=0, type=int)
     parser.add_argument('--lambda_semi_adv', default=0.001, type=int)
-    parser.add_argument("--lambda-adv-pred", type=float, default=0.1)
+    parser.add_argument("--lambda-adv-pred", type=float, default=0.01)
     parser.add_argument('--mask_T', default=0.2, type=int)
 
     # frequently change args
@@ -235,7 +235,7 @@ def main():
         train(args, epoch, model, model_D, train_loader_unlabel, train_loader_label, trainloader_label_iter, optimizer, optimizer_D, loss_fn, writer, interp)
 
 
-        if epoch == 1 or epoch % 5 == 0:
+        if epoch == 1 or epoch % 2 == 0:
             dice = val(args, epoch, model, val_loader, optimizer, loss_fn, writer)
             # save checkpoint
             is_best = False
