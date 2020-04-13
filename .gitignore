@@ -132,4 +132,5 @@ dmypy.json
 # added by xuyangcao 
 /work
 /log
+/results
 val_train.sh
