@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '2' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
 import tqdm
 import shutil 
 import argparse
@@ -94,10 +94,10 @@ def main():
                     shutil.rmtree(args.save_image_path)
                 os.makedirs(args.save_image_path, exist_ok=True)
                 # label path
-                args.save_label_path = save_path + '/label' 
-                if os.path.exists(args.save_label_path):
-                    shutil.rmtree(args.save_label_path)
-                os.makedirs(args.save_label_path, exist_ok=True)
+                args.save_pred_path = save_path + '/pred' 
+                if os.path.exists(args.save_pred_path):
+                    shutil.rmtree(args.save_pred_path)
+                os.makedirs(args.save_pred_path, exist_ok=True)
                 print('=> saving images in :', save_path)
             else:
                 print('we don\'t save any images!')
@@ -187,7 +187,7 @@ def test(args, loader, model):
                 #image = draw_results(image, label, pred)
                 #imsave(os.path.join(args.save_image_path, file_name[0]), image)
                 imsave(os.path.join(args.save_image_path, file_name[0]), image)
-                imsave(os.path.join(args.save_label_path, file_name[0]), label)
+                imsave(os.path.join(args.save_pred_path, file_name[0]), pred)
                 #break # debug
             
 

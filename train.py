@@ -194,8 +194,8 @@ def main():
     uncertain_map = torch.zeros(nTrain, 2, width, height).float()  
     for epoch in range(args.start_epoch, args.n_epochs + 1):
         # learning rate
-        if epoch % 25 == 0:
-            if epoch % 50 == 0:
+        if epoch % 30 == 0:
+            if epoch % 60 == 0:
                 lr *= 0.2
             else:
                 lr *= 0.5
@@ -213,11 +213,11 @@ def main():
                                   **kwargs) # set return_index==true 
         oukputs, losses, sup_losses, unsup_losses, w, uncertain = train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs)
         if args.is_uncertain:
-            alpha = (1 - uncertain) * args.alpha_psudo
+            alpha = (1 - uncertain) * args.alpha_psudo + uncertain
         else:
             alpha = args.alpha_psudo
         Z = alpha * Z + (1-alpha)*outputs
-        z = Z * (1. / (1.-alpha**(epoch+1)))
+        z = Z * (1. / (1.-0.6**(epoch+1)))
 
         writer.add_scalar('super_loss/epoch', np.sum(sup_losses)/args.sample_k, epoch)
         writer.add_scalar('unsuper_loss/epoch', np.mean(unsup_losses)*w, epoch)
@@ -225,14 +225,14 @@ def main():
         writer.add_scalar('w/epoch', w.item(), epoch)
         writer.add_scalar('lr/epoch', lr, epoch)
 
-        if epoch == 1 or epoch % 5 == 0:
+        if epoch == 1 or epoch % 3 == 0:
             dice = val(args, epoch, model, val_loader, optimizer, loss_fn, writer)
             # save checkpoint
             is_best = False
             if dice > best_pre:
                 is_best = True
                 best_pre = dice
-            if is_best or epoch % 10 == 0:
+            if is_best or epoch % 3 == 0:
                 save_checkpoint({'epoch': epoch,
                                  'state_dict': model.state_dict(),
                                  'best_pre': best_pre},
