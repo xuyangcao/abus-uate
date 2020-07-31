@@ -60,7 +60,7 @@ def main():
         raise(RuntimeError('error in building network!'))
 
     model = model.cuda()
-    model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
+    #model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
 
 
     # --- resume trained weights ---
@@ -85,7 +85,7 @@ def main():
             else:
                 save_path = os.path.join(os.path.dirname(args.resume), file_name)
                 csv_path = os.path.dirname(args.resume)
-            setproctitle.setproctitle(save_path)
+            setproctitle.setproctitle('xuyangcao_semi_testing')
 
             if args.save_image:
                 # image path

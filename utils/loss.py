@@ -35,6 +35,7 @@ class CrossEntropy2d(nn.Module):
         """
         assert not target.requires_grad
         assert predict.dim() == 4
+        #print('target.dim(): ', target.dim())
         assert target.dim() == 3
         assert predict.size(0) == target.size(0), "{0} vs {1} ".format(predict.size(0), target.size(0))
         assert predict.size(2) == target.size(1), "{0} vs {1} ".format(predict.size(2), target.size(1))

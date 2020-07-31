@@ -191,6 +191,7 @@ class ToTensor(object):
         if self._mode == 'train' or self._mode == 'test' or self._mode == 'val':
             image, target = sample['image'], sample['target']
             target = np.expand_dims(target, 0)
+            #print('image.shape: ', image.shape)
             image = image.transpose((2, 0, 1))
             image = torch.from_numpy(image)
 
