@@ -20,7 +20,7 @@ def loss_calc(pred, label):
 
 class CrossEntropy2d(nn.Module):
 
-    def __init__(self, reduction=True, ignore_label=255):
+    def __init__(self, reduction='mean', ignore_label=255):
         super(CrossEntropy2d, self).__init__()
         self.reduction = reduction 
         self.ignore_label = ignore_label
