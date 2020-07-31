@@ -161,25 +161,27 @@ def compute_argmax_map(output):
     output = torch.from_numpy(output).float()
     return output
      
-def find_good_maps(D_outs, pred_all):
+def find_good_maps(D_outs, pred_all, img_all):
     count = 0
     for i in range(D_outs.size(0)):
         if D_outs[i] > args.threshold_st:
             count +=1
 
     if count > 0:
-        logging.info('Above ST-Threshold : {} / {}'.format(count, args.batch_size))
+        logging.info('=== Above ST-Threshold : {} / {} ==='.format(count, args.batch_size))
         pred_sel = torch.Tensor(count, pred_all.size(1), pred_all.size(2), pred_all.size(3))
         label_sel = torch.Tensor(count, pred_sel.size(2), pred_sel.size(3))
+        img_sel = torch.Tensor(count, img_all.size(1), img_all.size(2), img_all.size(3))
         num_sel = 0 
         for j in range(D_outs.size(0)):
             if D_outs[j] > args.threshold_st:
                 pred_sel[num_sel] = pred_all[j]
                 label_sel[num_sel] = compute_argmax_map(pred_all[j])
+                img_sel[num_sel] = img_all[j]
                 num_sel +=1
-        return  pred_sel.cuda(), label_sel.cuda(), count  
+        return  pred_sel.cuda(), label_sel.cuda(), count, img_sel.cuda()
     else:
-        return 0, 0, count 
+        return 0, 0, count, 0 
 
 def main():
     #####################
@@ -359,6 +361,17 @@ def main():
         #pred_remain = interp(model(images_remain))
         pred_remain = model(images_remain)
 
+        # concatenate the prediction with the input images
+        images_remain = images_remain * 0.5 + 0.5 # normalize to [0,1]
+        pred_cat = torch.cat((F.softmax(pred_remain, dim=1), images_remain), dim=1)
+        #D_out_z, D_out_y_pred = model_D(pred_cat) # predicts the D ouput 0-1 and feature map for FM-loss 
+        D_out_z, D_out_y_pred = model_D(pred_remain) # predicts the D ouput 0-1 and feature map for FM-loss 
+  
+        # find predicted segmentation maps above threshold 
+        fake_prob = 'D_out_fake: {}'.format(D_out_z.cpu().detach().numpy().flatten())
+        logging.info(fake_prob)
+        pred_sel, labels_sel, count, images_sel = find_good_maps(D_out_z, pred_remain, images_remain) 
+
         # show predictions of unlabeled data
         with torch.no_grad():
             padding = 10
@@ -376,25 +389,40 @@ def main():
                 ax.set_title('unlabeled images')
                 ax = fig.add_subplot(212)
                 ax.imshow(pre_img)
-                ax.set_title('unlabeled_prediction')
+                ax.set_title(fake_prob)
                 fig.tight_layout() 
                 writer.add_figure('train_unlabeled_result', fig, i_iter)
                 fig.clear()
 
-        
-        # concatenate the prediction with the input images
-        images_remain = images_remain * 0.5 + 0.5 # normalize to [0,1]
-        pred_cat = torch.cat((F.softmax(pred_remain, dim=1), images_remain), dim=1)
-        #D_out_z, D_out_y_pred = model_D(pred_cat) # predicts the D ouput 0-1 and feature map for FM-loss 
-        D_out_z, D_out_y_pred = model_D(pred_remain) # predicts the D ouput 0-1 and feature map for FM-loss 
-  
-        # find predicted segmentation maps above threshold 
-        logging.info('D_outs_fake: {}'.format(D_out_z.cpu().detach().view(-1)))
-        pred_sel, labels_sel, count = find_good_maps(D_out_z, pred_remain) 
-
         # training loss on above threshold segmentation predictions (Cross Entropy Loss)
         if count > 0 and i_iter > 0:
             loss_st = loss_calc(pred_sel, labels_sel)
+            writer.add_scalar('train_loss_st', loss_st.cpu(), i_iter)
+            # show predictions of unlabeled data
+            with torch.no_grad():
+                padding = 10
+                nrow = 4
+                if i_iter % 20 == 0:
+                    img = (images_sel * 0.5 + 0.5)
+                    img = make_grid(img, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
+                    gt = make_grid(labels_sel.unsqueeze(dim=1), nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                    gt_img = label2rgb(gt, img, bg_label=0)
+
+                    pre = torch.max(pred_sel, dim=1, keepdim=True)[1]
+                    pre = pre.float()
+                    pre = make_grid(pre, nrow=nrow, padding=padding).cpu().numpy().transpose(1, 2, 0)[:, :, 0]
+                    pre_img = label2rgb(pre, img, bg_label=0)
+
+                    fig = plt.figure()
+                    ax = fig.add_subplot(211)
+                    ax.imshow(gt_img)
+                    ax.set_title('pseudo_labels')
+                    ax = fig.add_subplot(212)
+                    ax.imshow(pre_img)
+                    ax.set_title('unlabeled_prediction')
+                    fig.tight_layout() 
+                    writer.add_figure('train_ST_result', fig, i_iter)
+                    fig.clear()
         else:
             loss_st = 0.0
 
@@ -417,7 +445,7 @@ def main():
         D_gt_v_cat = torch.cat((D_gt_v, images_gt), dim=1)
         #D_out_z_gt , D_out_y_gt = model_D(D_gt_v_cat)
         D_out_z_gt , D_out_y_gt = model_D(D_gt_v)
-        logging.info('D_outs_real: {}'.format(D_out_z_gt.cpu().detach().view(-1)))
+        logging.info('D_outs_real: {}'.format(D_out_z_gt.cpu().detach().numpy().flatten()))
         
         # L1 loss for Feature Matching Loss
         loss_fm = torch.mean(torch.abs(torch.mean(D_out_y_gt, 0) - torch.mean(D_out_y_pred, 0)))
@@ -434,35 +462,34 @@ def main():
         loss_S_value += loss_S.item()
 
         # train D
-        if i_iter % 1 == 0:
-            for param in model_D.parameters():
-                param.requires_grad = True
+        for param in model_D.parameters():
+            param.requires_grad = True
 
-            # train with pred
-            #pred_cat = pred_cat.detach()  # detach does not allow the graddients to back propagate.
-            pred_remain = pred_remain.detach()
+        # train with pred
+        #pred_cat = pred_cat.detach()  # detach does not allow the graddients to back propagate.
+        pred_remain = pred_remain.detach()
 
-            
-            #D_out_z, _ = model_D(pred_cat)
-            D_out_z, _ = model_D(pred_remain)
-            y_fake_ = Variable(torch.zeros(D_out_z.size(0), 1).cuda())
-            loss_D_fake = criterion(D_out_z, y_fake_) 
+        
+        #D_out_z, _ = model_D(pred_cat)
+        D_out_z, _ = model_D(pred_remain)
+        y_fake_ = Variable(torch.zeros(D_out_z.size(0), 1).cuda())
+        loss_D_fake = criterion(D_out_z, y_fake_) 
 
-            # train with gt
-            #D_out_z_gt , _ = model_D(D_gt_v_cat)
-            D_out_z_gt , _ = model_D(D_gt_v)
-            y_real_ = Variable(torch.ones(D_out_z_gt.size(0), 1).cuda()) 
-            loss_D_real = criterion(D_out_z_gt, y_real_)
-            
-            loss_D = (loss_D_fake + loss_D_real)/2.0
-            #alpha_fake_d = 0.2
-            #loss_D = alpha_fake_d * loss_D_fake + (1 - alpha_fake_d) * loss_D_real
-            loss_D.backward()
-            loss_D_value += loss_D.item()
-            writer.add_scalar('train_loss_D', loss_D_value, i_iter)
+        # train with gt
+        #D_out_z_gt , _ = model_D(D_gt_v_cat)
+        D_out_z_gt , _ = model_D(D_gt_v)
+        y_real_ = Variable(torch.ones(D_out_z_gt.size(0), 1).cuda()) 
+        loss_D_real = criterion(D_out_z_gt, y_real_)
+        
+        loss_D = (loss_D_fake + loss_D_real)/2.0
+        #alpha_fake_d = 0.2
+        #loss_D = alpha_fake_d * loss_D_fake + (1 - alpha_fake_d) * loss_D_real
+        loss_D.backward()
+        loss_D_value += loss_D.item()
+        writer.add_scalar('train_loss_D', loss_D_value, i_iter)
 
-            optimizer.step()
-            optimizer_D.step()
+        optimizer.step()
+        optimizer_D.step()
 
         logging.info('iter = {0:8d}/{1:8d}, loss_ce = {2:.3f}, loss_fm = {3:.3f}, loss_S = {4:.3f}, loss_D = {5:.3f}'.format(i_iter, args.num_steps, loss_ce_value, loss_fm_value, loss_S_value, loss_D_value))
         writer.add_scalar('train_loss_ce', loss_ce_value, i_iter)
