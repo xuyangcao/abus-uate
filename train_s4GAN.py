@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import sys
 import tqdm
 import argparse
@@ -55,6 +55,8 @@ def get_arguments():
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
     parser.add_argument("--num_classes", type=int, default=2,
                         help="Number of classes to predict (including background).")
+    parser.add_argument("--in_channels_d", type=int, default=3,
+                        help="input channels of the discriminator")
 
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument("--learning_rate", type=float, default=2.5e-4,
@@ -68,6 +70,8 @@ def get_arguments():
     parser.add_argument("--momentum", type=float, default=0.9,
                         help="Momentum component of the optimiser.")
 
+    parser.add_argument("--lambda_adv", type=float, default=0.1,
+                        help="lambda_adv for loss_adv.")
     parser.add_argument("--lambda_fm", type=float, default=0.1,
                         help="lambda_fm for feature-matching loss.")
     parser.add_argument("--lambda_st", type=float, default=1.0,
@@ -189,7 +193,7 @@ def main():
     #####################
     logging.info('--- building network ---')
     model = DenseUnet(arch='161', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
-    model_D = s4GAN_discriminator(num_classes=2)
+    model_D = s4GAN_discriminator(in_channels=args.in_channels_d, num_classes=2)
     if args.ngpu > 1:
         model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
         model_D = nn.parallel.DataParallel(model_D, list(range(args.ngpu)))
@@ -268,15 +272,15 @@ def main():
     # optimizer & loss  #
     #####################
     logging.info('--- configing optimizer & losses ---')
-    optimizer = optim.SGD(model.parameters(),
-                lr=args.learning_rate, momentum=args.momentum,weight_decay=args.weight_decay)
+    optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, momentum=args.momentum,weight_decay=args.weight_decay)
+    #optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9,0.99), weight_decay=args.weight_decay)
     optimizer.zero_grad()
 
     # optimizer for discriminator network
     optimizer_D = optim.Adam(model_D.parameters(), lr=args.learning_rate_D, betas=(0.9,0.99))
     optimizer_D.zero_grad()
 
-    interp = nn.Upsample(size=(128, 512), mode='bilinear', align_corners=True)
+    #interp = nn.Upsample(size=(128, 512), mode='bilinear', align_corners=True)
 
     # labels for adversarial training
     pred_label = 0
@@ -289,6 +293,7 @@ def main():
     #   strat training  #
     #####################
     logging.info('--- start training ---')
+    best_pre = 0
     for i_iter in range(args.num_steps):
 
         loss_ce_value = 0
@@ -312,16 +317,18 @@ def main():
         except:
             trainloader_iter = enumerate(trainloader)
             _, batch = next(trainloader_iter)
-
-        #images, labels, _, _, _ = batch
         images, labels = batch['image'], batch['target']
         images = Variable(images).cuda()
-        #pred = interp(model(images))
         pred = model(images)
-        #labels = labels.squeeze(axis=1)
-        #print('labels.shape', labels.shape)
         #loss_ce = loss_calc(pred, labels) # Cross entropy loss for labeled data
         loss_ce = loss_fn['dice_loss'](labels, F.softmax(pred, dim=1))
+        if args.in_channels_d == 3:
+            images = images * 0.5 + 0.5
+            s_labeled_cat = torch.cat((F.softmax(pred, dim=1), images[:, 0:1, ...]), dim=1)
+            D_out_labeled, _ = model_D(s_labeled_cat)
+        else:
+            s_labeled_cat = F.softmax(pred, dim=1)
+            D_out_labeled, _ = model_D(s_labeled_cat)
 
         # show predictions of labeled data
         with torch.no_grad():
@@ -358,14 +365,19 @@ def main():
         
         images_remain = batch_remain['image']
         images_remain = Variable(images_remain).cuda()
-        #pred_remain = interp(model(images_remain))
         pred_remain = model(images_remain)
 
         # concatenate the prediction with the input images
-        images_remain = images_remain * 0.5 + 0.5 # normalize to [0,1]
-        pred_cat = torch.cat((F.softmax(pred_remain, dim=1), images_remain), dim=1)
-        #D_out_z, D_out_y_pred = model_D(pred_cat) # predicts the D ouput 0-1 and feature map for FM-loss 
-        D_out_z, D_out_y_pred = model_D(pred_remain) # predicts the D ouput 0-1 and feature map for FM-loss 
+        if args.in_channels_d == 3:
+            images_remain = images_remain * 0.5 + 0.5 # normalize to [0,1]
+            pred_cat = torch.cat((F.softmax(pred_remain, dim=1), images_remain[:, 0:1, ...]), dim=1)
+            D_out_z, D_out_y_pred = model_D(pred_cat) # predicts the D ouput 0-1 and feature map for FM-loss 
+        else:
+            D_out_z, D_out_y_pred = model_D(F.softmax(pred_remain, dim=1)) # predicts the D ouput 0-1 and feature map for FM-loss 
+
+        D_out_all = torch.cat((D_out_labeled, D_out_z), dim=0)
+        label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
+        loss_adv = F.binary_cross_entropy_with_logits(D_out_all, label_)
   
         # find predicted segmentation maps above threshold 
         fake_prob = 'D_out_fake: {}'.format(D_out_z.cpu().detach().numpy().flatten())
@@ -398,6 +410,7 @@ def main():
         if count > 0 and i_iter > 0:
             loss_st = loss_calc(pred_sel, labels_sel)
             writer.add_scalar('train_loss_st', loss_st.cpu(), i_iter)
+
             # show predictions of unlabeled data
             with torch.no_grad():
                 padding = 10
@@ -432,32 +445,30 @@ def main():
         except:
             trainloader_gt_iter = enumerate(trainloader_gt)
             _, batch_gt = next(trainloader_gt_iter)
-
-        #images_gt, labels_gt, _, _, _ = batch_gt
         images_gt, labels_gt = batch_gt['image'], batch_gt['target']
         # Converts grounth truth segmentation into 'num_classes' segmentation maps. 
         labels_gt = labels_gt.squeeze(axis=1)
         D_gt_v = Variable(one_hot(labels_gt)).cuda()
-                
         images_gt = images_gt.cuda()
-        #images_gt = (images_gt - torch.min(images_gt))/(torch.max(images)-torch.min(images))
-            
-        D_gt_v_cat = torch.cat((D_gt_v, images_gt), dim=1)
-        #D_out_z_gt , D_out_y_gt = model_D(D_gt_v_cat)
-        D_out_z_gt , D_out_y_gt = model_D(D_gt_v)
+        #the followig commented line is useful in multiclass segmentaiton
+        #images_gt = (images_gt - torch.min(images_gt))/(torch.max(images)-torch.min(images)) 
+        if args.in_channels_d == 3:
+            D_gt_v_cat = torch.cat((D_gt_v, images_gt[:, 0:1, ...]), dim=1)
+            D_out_z_gt , D_out_y_gt = model_D(D_gt_v_cat)
+        else:
+            D_out_z_gt , D_out_y_gt = model_D(D_gt_v)
         logging.info('D_outs_real: {}'.format(D_out_z_gt.cpu().detach().numpy().flatten()))
         
         # L1 loss for Feature Matching Loss
         loss_fm = torch.mean(torch.abs(torch.mean(D_out_y_gt, 0) - torch.mean(D_out_y_pred, 0)))
     
         if count > 0 and i_iter > 0: # if any good predictions found for self-training loss
-            loss_S = loss_ce +  args.lambda_fm*loss_fm + args.lambda_st*loss_st 
+            loss_S = loss_ce +  args.lambda_fm*loss_fm + args.lambda_st*loss_st + args.lambda_adv * loss_adv
         else:
-            loss_S = loss_ce + args.lambda_fm*loss_fm
+            loss_S = loss_ce + args.lambda_fm*loss_fm + args.lambda_adv * loss_adv
 
         loss_S.backward()
         loss_fm_value+= args.lambda_fm*loss_fm
-
         loss_ce_value += loss_ce.item()
         loss_S_value += loss_S.item()
 
@@ -466,24 +477,24 @@ def main():
             param.requires_grad = True
 
         # train with pred
-        #pred_cat = pred_cat.detach()  # detach does not allow the graddients to back propagate.
-        pred_remain = pred_remain.detach()
-
-        
-        #D_out_z, _ = model_D(pred_cat)
-        D_out_z, _ = model_D(pred_remain)
+        if args.in_channels_d == 3:
+            pred_cat = pred_cat.detach()  # detach does not allow the graddients to back propagate.
+            D_out_z, _ = model_D(pred_cat)
+        else:
+            pred_remain = pred_remain.detach()
+            D_out_z, _ = model_D(F.softmax(pred_remain, dim=1))
         y_fake_ = Variable(torch.zeros(D_out_z.size(0), 1).cuda())
         loss_D_fake = criterion(D_out_z, y_fake_) 
 
         # train with gt
-        #D_out_z_gt , _ = model_D(D_gt_v_cat)
-        D_out_z_gt , _ = model_D(D_gt_v)
+        if args.in_channels_d == 3:
+            D_out_z_gt , _ = model_D(D_gt_v_cat)
+        else:
+            D_out_z_gt , _ = model_D(D_gt_v)
         y_real_ = Variable(torch.ones(D_out_z_gt.size(0), 1).cuda()) 
         loss_D_real = criterion(D_out_z_gt, y_real_)
         
         loss_D = (loss_D_fake + loss_D_real)/2.0
-        #alpha_fake_d = 0.2
-        #loss_D = alpha_fake_d * loss_D_fake + (1 - alpha_fake_d) * loss_D_real
         loss_D.backward()
         loss_D_value += loss_D.item()
         writer.add_scalar('train_loss_D', loss_D_value, i_iter)
@@ -495,20 +506,21 @@ def main():
         writer.add_scalar('train_loss_ce', loss_ce_value, i_iter)
         writer.add_scalar('train_loss_fm', loss_fm_value, i_iter)
         writer.add_scalar('train_loss_S', loss_S_value, i_iter)
+        writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
 
         if i_iter % 2000 == 0:
-            val(i_iter, model, val_loader)
-
-        if i_iter >= args.num_steps-1:
-            logging.info('saving checkpoing ...')
+            dice = val(i_iter, model, val_loader)
+            # save best checkpoint
+            is_best = False
+            if dice > best_pre:
+                is_best = True
+                best_pre = dice
             save_checkpoint({'epoch': i_iter,
                              'state_dict': model.state_dict(),
-                             'best_pre': 0.},
-                              False, 
+                             'best_pre': best_pre},
+                              is_best, 
                               args.save, 
                               args.arch)
-            torch.save(model_D.state_dict(),os.path.join(args.save, 'abus'+str(i_iter)+'_D.pth'))
-            break
 
         if i_iter % args.save_pred_every == 0 and i_iter!=0:
             logging.info('saving checkpoing ...')

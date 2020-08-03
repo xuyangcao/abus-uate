@@ -30,10 +30,10 @@ class FCDiscriminator(nn.Module):
 		return x
 
 class s4GAN_discriminator(nn.Module):
-    def __init__(self, in_channel=2, num_classes=2, ndf = 64):
+    def __init__(self, in_channels=2, num_classes=2, ndf = 64):
         super(s4GAN_discriminator, self).__init__()
 
-        self.conv1 = nn.Conv2d(in_channel, ndf, kernel_size=4, stride=2, padding=1) # 160 x 160
+        self.conv1 = nn.Conv2d(in_channels, ndf, kernel_size=4, stride=2, padding=1) # 160 x 160
         self.conv2 = nn.Conv2d(  ndf, ndf*2, kernel_size=4, stride=2, padding=1) # 80 x 80
         self.conv3 = nn.Conv2d(ndf*2, ndf*4, kernel_size=4, stride=2, padding=1) # 40 x 40
         self.conv4 = nn.Conv2d(ndf*4, ndf*8, kernel_size=4, stride=2, padding=1) # 20 x 20

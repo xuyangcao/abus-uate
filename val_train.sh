@@ -1,4 +1,12 @@
-python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm1_dlabel_k100 --threshold_st 0.5 -k 100 --lambda_fm 1
+python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_lrd1e-6_k100_ladv0.01 --threshold_st 0.6 -k 100 --lambda_fm 0.1 --learning_rate_D 0.000001 --lambda_adv 0.01
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_lrd1e-6_k100_ladv1 --threshold_st 0.6 -k 100 --lambda_fm 0.1 --learning_rate_D 0.000001 --lambda_adv 1
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_lrd1e-6_adam_k100_lossadv1 --threshold_st 0.6 -k 100 --lambda_fm 0.1 --learning_rate_D 0.000001 --lambda_adv 1
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_lrd1e-6_adam_k100_lossadv --threshold_st 0.6 -k 100 --lambda_fm 0.1 --learning_rate_D 0.000001 --lambda_adv 0.1
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_lrd1e-6_k100 --threshold_st 0.6 -k 100 --lambda_fm 0.1 --learning_rate_D 0.000001
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_lrd1e-4_k100 --threshold_st 0.6 -k 100 --lambda_fm 0.1 --learning_rate_D 0.0001
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dorilabel_k100 --threshold_st 0.6 -k 100 --lambda_fm 0.1
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm0.1_dlabel_k100 --threshold_st 0.6 -k 100 --lambda_fm 0.1
+#python train_s4GAN.py --save ./work/gan/s4gan_thst0.5_lfm1_dlabel_k100 --threshold_st 0.5 -k 100 --lambda_fm 1
 # ----
 
 
