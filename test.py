@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
 import tqdm
 import shutil 
 import argparse
@@ -164,7 +164,7 @@ def test(args, loader, model):
             perd = pred.astype(np.float)
 
             # get metrics
-            metrics = get_metrics(pred, label, voxelspacing=(0.21, 0.21)) 
+            metrics = get_metrics(pred, label, voxelspacing=(0.29, 0.14)) 
             dsc_list.append(metrics['dsc'])
             jc_list.append(metrics['jc'])
             hd95_list.append(metrics['hd95'])
@@ -198,8 +198,8 @@ def test(args, loader, model):
         df['jc'] = np.array(jc_list)
         df['hd95'] = np.array(hd95_list)
         df['acc'] = np.array(acc_list)
-        print(df.describe())
         df['hd'] = np.array(hd_list)
+        print(df.describe())
         df['precision'] = np.array(precision_list)
         df['recall'] = np.array(recall_list)
         df['area'] = np.array(area_list)
