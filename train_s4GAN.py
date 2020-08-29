@@ -4,7 +4,6 @@ import sys
 import tqdm
 import argparse
 import random
-import timeit
 import shutil
 import logging
 
@@ -37,6 +36,7 @@ from models.discriminator import s4GAN_discriminator
 from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
 from utils.utils import save_checkpoint, confusion
 from utils.loss import CrossEntropy2d, DiceLoss
+from utils.utils import one_hot as one_hot_tensor
 
 def get_arguments():
     """Parse all the arguments provided from the CLI.
@@ -59,24 +59,24 @@ def get_arguments():
                         help="input channels of the discriminator")
 
     parser.add_argument('--batch_size', type=int, default=8)
-    parser.add_argument("--learning_rate", type=float, default=2.5e-4,
+    parser.add_argument("--learning_rate", type=float, default=3e-5,
                         help="Base learning rate for training with polynomial decay.")
-    parser.add_argument("--learning_rate_D", type=float, default=1e-5,
+    parser.add_argument("--learning_rate_D", type=float, default=1e-6,
                         help="Base learning rate for discriminator.")
-    parser.add_argument("--weight_decay", type=float, default=0.0005,
+    parser.add_argument("--weight_decay", type=float, default=1e-8,
                         help="Regularisation parameter for L2-loss.")
     parser.add_argument("--power", type=float, default=0.9,
                         help="Decay parameter to compute the learning rate.")
     parser.add_argument("--momentum", type=float, default=0.9,
                         help="Momentum component of the optimiser.")
 
-    parser.add_argument("--lambda_adv", type=float, default=0.1,
+    parser.add_argument("--lambda_adv", type=float, default=0.01,
                         help="lambda_adv for loss_adv.")
     parser.add_argument("--lambda_fm", type=float, default=0.1,
                         help="lambda_fm for feature-matching loss.")
     parser.add_argument("--lambda_st", type=float, default=1.0,
                         help="lambda_st for self-training.")
-    parser.add_argument("--threshold_st", type=float, default=0.4,
+    parser.add_argument("--threshold_st", type=float, default=0.5,
                         help="threshold_st for the self-training threshold.")
 
     parser.add_argument("--num-steps", type=int, default=40000,
@@ -85,8 +85,8 @@ def get_arguments():
                         help="Save summaries and checkpoint every often.")
 
     # frequently change args
-    parser.add_argument('--log_dir', default='./log/gan')
-    parser.add_argument('--save', default='./work/gan/s4gan_thst_0.4')
+    parser.add_argument('--log_dir', default='./log/gan_task2')
+    parser.add_argument('--save', default='./work/gan_task2/s4gan_thst_0.4')
 
     return parser.parse_args()
 
@@ -138,17 +138,23 @@ def loss_calc(pred, label):
 def lr_poly(base_lr, iter, max_iter, power):
     return base_lr*((1-float(iter)/max_iter)**(power))
 
+def lr_poly_1inear(base_lr, iter, scale=0.65):
+    power = iter // 5000 
+    return base_lr * scale**power
+
 def adjust_learning_rate(optimizer, i_iter):
-    lr = lr_poly(args.learning_rate, i_iter, args.num_steps, args.power)
-    optimizer.param_groups[0]['lr'] = lr
-    if len(optimizer.param_groups) > 1 :
-        optimizer.param_groups[1]['lr'] = lr * 10
+    lr = lr_poly_1inear(args.learning_rate, i_iter)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+    writer.add_scalar('train_lrG', lr, i_iter)
 
 def adjust_learning_rate_D(optimizer, i_iter):
-    lr = lr_poly(args.learning_rate_D, i_iter, args.num_steps, args.power)
-    optimizer.param_groups[0]['lr'] = lr
-    if len(optimizer.param_groups) > 1 :
-        optimizer.param_groups[1]['lr'] = lr * 10
+    lr = lr_poly_1inear(args.learning_rate_D, i_iter)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+    writer.add_scalar('train_lrD', lr, i_iter)
 
 def one_hot(label):
     label = label.numpy()
@@ -272,20 +278,16 @@ def main():
     # optimizer & loss  #
     #####################
     logging.info('--- configing optimizer & losses ---')
-    optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, momentum=args.momentum,weight_decay=args.weight_decay)
-    #optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9,0.99), weight_decay=args.weight_decay)
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=(0.9,0.99), weight_decay=args.weight_decay)
     optimizer.zero_grad()
 
     # optimizer for discriminator network
     optimizer_D = optim.Adam(model_D.parameters(), lr=args.learning_rate_D, betas=(0.9,0.99))
     optimizer_D.zero_grad()
 
-    #interp = nn.Upsample(size=(128, 512), mode='bilinear', align_corners=True)
-
     # labels for adversarial training
     pred_label = 0
     gt_label = 1
-
     y_real_, y_fake_ = Variable(torch.ones(batch_size, 1).cuda()), Variable(torch.zeros(batch_size, 1).cuda())
 
 
@@ -294,24 +296,19 @@ def main():
     #####################
     logging.info('--- start training ---')
     best_pre = 0
+    lr = args.learning_rate
+    lr_d = args.learning_rate_D
     for i_iter in range(args.num_steps):
-
-        loss_ce_value = 0
-        loss_D_value = 0
-        loss_fm_value = 0
-        loss_S_value = 0
-
         optimizer.zero_grad()
-        adjust_learning_rate(optimizer, i_iter)
         optimizer_D.zero_grad()
+        adjust_learning_rate(optimizer, i_iter)
         adjust_learning_rate_D(optimizer_D, i_iter)
 
-        # train Segmentation Network 
-        # don't accumulate grads in D
+        ## 1 train Segmentation Network, don't accumulate grads in D
         for param in model_D.parameters():
             param.requires_grad = False
 
-        # training loss for labeled data only
+        ## 1.1 training loss for labeled data only
         try:
             _, batch = next(trainloader_iter)
         except:
@@ -324,11 +321,16 @@ def main():
         loss_ce = loss_fn['dice_loss'](labels, F.softmax(pred, dim=1))
         if args.in_channels_d == 3:
             images = images * 0.5 + 0.5
-            s_labeled_cat = torch.cat((F.softmax(pred, dim=1), images[:, 0:1, ...]), dim=1)
+            pred_soft = F.softmax(pred, dim=1)
+            #pred_soft = torch.max(pred, dim=1)[1]
+            #pred_soft = one_hot_tensor(pred_soft)
+            s_labeled_cat = torch.cat((pred_soft, images[:, 0:1, ...]), dim=1)
             D_out_labeled, _ = model_D(s_labeled_cat)
         else:
-            s_labeled_cat = F.softmax(pred, dim=1)
-            D_out_labeled, _ = model_D(s_labeled_cat)
+            pred_soft = F.softmax(pred, dim=1)
+            #pred_soft = torch.max(pred, dim=1)[1]
+            #s_labeled_cat = one_hot_tensor(pred_soft)
+            D_out_labeled, _ = model_D(pred_soft)
 
         # show predictions of labeled data
         with torch.no_grad():
@@ -356,24 +358,29 @@ def main():
                 writer.add_figure('train_labeled_result', fig, i_iter)
                 fig.clear()
         
-        #training loss for remaining unlabeled data
+        ## 1.2 training loss for remaining unlabeled data
         try:
             batch_remain = next(trainloader_remain_iter)
         except:
             trainloader_remain_iter = iter(trainloader_remain)
             batch_remain = next(trainloader_remain_iter)
-        
         images_remain = batch_remain['image']
         images_remain = Variable(images_remain).cuda()
         pred_remain = model(images_remain)
-
         # concatenate the prediction with the input images
         if args.in_channels_d == 3:
             images_remain = images_remain * 0.5 + 0.5 # normalize to [0,1]
-            pred_cat = torch.cat((F.softmax(pred_remain, dim=1), images_remain[:, 0:1, ...]), dim=1)
+            pred_remain = F.softmax(pred_remain, dim=1)
+            #pred_remain = torch.max(pred_remain, dim=1)[1]
+            #pred_remain = one_hot_tensor(pred_remain)
+            #print('pred_remain.sum():', pred_remain[:, 0, ...].sum())
+            pred_cat = torch.cat((pred_remain, images_remain[:, 0:1, ...]), dim=1)
             D_out_z, D_out_y_pred = model_D(pred_cat) # predicts the D ouput 0-1 and feature map for FM-loss 
         else:
-            D_out_z, D_out_y_pred = model_D(F.softmax(pred_remain, dim=1)) # predicts the D ouput 0-1 and feature map for FM-loss 
+            pred_remain = F.softmax(pred_remain, dim=1)
+            #pred_remain = torch.max(pred_remain, dim=1)[1]
+            #pred_remain = one_hot_tensor(pred_remain)
+            D_out_z, D_out_y_pred = model_D(pred_remain) # predicts the D ouput 0-1 and feature map for FM-loss 
 
         D_out_all = torch.cat((D_out_labeled, D_out_z), dim=0)
         label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
@@ -407,10 +414,9 @@ def main():
                 fig.clear()
 
         # training loss on above threshold segmentation predictions (Cross Entropy Loss)
-        if count > 0 and i_iter > 0:
+        if count > 0 and i_iter > 1000:
             loss_st = loss_calc(pred_sel, labels_sel)
             writer.add_scalar('train_loss_st', loss_st.cpu(), i_iter)
-
             # show predictions of unlabeled data
             with torch.no_grad():
                 padding = 10
@@ -446,12 +452,10 @@ def main():
             trainloader_gt_iter = enumerate(trainloader_gt)
             _, batch_gt = next(trainloader_gt_iter)
         images_gt, labels_gt = batch_gt['image'], batch_gt['target']
-        # Converts grounth truth segmentation into 'num_classes' segmentation maps. 
         labels_gt = labels_gt.squeeze(axis=1)
         D_gt_v = Variable(one_hot(labels_gt)).cuda()
         images_gt = images_gt.cuda()
-        #the followig commented line is useful in multiclass segmentaiton
-        #images_gt = (images_gt - torch.min(images_gt))/(torch.max(images)-torch.min(images)) 
+        images_gt = images_gt * 0.5 + 0.5
         if args.in_channels_d == 3:
             D_gt_v_cat = torch.cat((D_gt_v, images_gt[:, 0:1, ...]), dim=1)
             D_out_z_gt , D_out_y_gt = model_D(D_gt_v_cat)
@@ -461,76 +465,75 @@ def main():
         
         # L1 loss for Feature Matching Loss
         loss_fm = torch.mean(torch.abs(torch.mean(D_out_y_gt, 0) - torch.mean(D_out_y_pred, 0)))
+        #loss_fm = F.mse_loss(D_out_y_pred, D_out_y_gt)
     
+        # total loss
         if count > 0 and i_iter > 0: # if any good predictions found for self-training loss
             loss_S = loss_ce +  args.lambda_fm*loss_fm + args.lambda_st*loss_st + args.lambda_adv * loss_adv
         else:
             loss_S = loss_ce + args.lambda_fm*loss_fm + args.lambda_adv * loss_adv
-
         loss_S.backward()
-        loss_fm_value+= args.lambda_fm*loss_fm
-        loss_ce_value += loss_ce.item()
-        loss_S_value += loss_S.item()
-
-        # train D
-        for param in model_D.parameters():
-            param.requires_grad = True
-
-        # train with pred
-        if args.in_channels_d == 3:
-            pred_cat = pred_cat.detach()  # detach does not allow the graddients to back propagate.
-            D_out_z, _ = model_D(pred_cat)
-        else:
-            pred_remain = pred_remain.detach()
-            D_out_z, _ = model_D(F.softmax(pred_remain, dim=1))
-        y_fake_ = Variable(torch.zeros(D_out_z.size(0), 1).cuda())
-        loss_D_fake = criterion(D_out_z, y_fake_) 
-
-        # train with gt
-        if args.in_channels_d == 3:
-            D_out_z_gt , _ = model_D(D_gt_v_cat)
-        else:
-            D_out_z_gt , _ = model_D(D_gt_v)
-        y_real_ = Variable(torch.ones(D_out_z_gt.size(0), 1).cuda()) 
-        loss_D_real = criterion(D_out_z_gt, y_real_)
-        
-        loss_D = (loss_D_fake + loss_D_real)/2.0
-        loss_D.backward()
-        loss_D_value += loss_D.item()
-        writer.add_scalar('train_loss_D', loss_D_value, i_iter)
-
         optimizer.step()
-        optimizer_D.step()
 
-        logging.info('iter = {0:8d}/{1:8d}, loss_ce = {2:.3f}, loss_fm = {3:.3f}, loss_S = {4:.3f}, loss_D = {5:.3f}'.format(i_iter, args.num_steps, loss_ce_value, loss_fm_value, loss_S_value, loss_D_value))
-        writer.add_scalar('train_loss_ce', loss_ce_value, i_iter)
-        writer.add_scalar('train_loss_fm', loss_fm_value, i_iter)
-        writer.add_scalar('train_loss_S', loss_S_value, i_iter)
+        # 2 train D
+        if i_iter % 1 == 0:
+            for param in model_D.parameters():
+                param.requires_grad = True
+
+            # 2.1 train with pred
+            if args.in_channels_d == 3:
+                pred_cat = pred_cat.detach()  # detach does not allow the graddients to back propagate.
+                D_out_z, _ = model_D(pred_cat)
+            else:
+                pred_remain = pred_remain.detach()
+                pred_remain = F.softmax(pred_remain, dim=1)
+                #pred_remain = torch.max(pred_remain, dim=1)[1]
+                #pred_remain = one_hot_tensor(pred_remain)
+                D_out_z, _ = model_D(pred_remain)
+            y_fake_ = Variable(torch.zeros(D_out_z.size(0), 1).cuda())
+            loss_D_fake = criterion(D_out_z, y_fake_) 
+
+            # 2.2 train with gt
+            if args.in_channels_d == 3:
+                D_out_z_gt , _ = model_D(D_gt_v_cat)
+            else:
+                D_out_z_gt , _ = model_D(D_gt_v)
+            y_real_ = Variable(torch.ones(D_out_z_gt.size(0), 1).cuda()) 
+            loss_D_real = criterion(D_out_z_gt, y_real_)
+            
+            loss_D = (loss_D_fake + loss_D_real)/2.0
+            loss_D.backward()
+            optimizer_D.step()
+
+        writer.add_scalar('train_loss_D', loss_D.item(), i_iter)
+        writer.add_scalar('train_loss_ce', loss_ce.item(), i_iter)
+        writer.add_scalar('train_loss_fm', loss_fm.item(), i_iter)
+        writer.add_scalar('train_loss_S', loss_S.item(), i_iter)
         writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
+        logging.info('=== iter: {} ==='.format(i_iter))
 
-        if i_iter % 2000 == 0:
+        if (i_iter+1) % 2000 == 0:
             dice = val(i_iter, model, val_loader)
             # save best checkpoint
             is_best = False
             if dice > best_pre:
                 is_best = True
                 best_pre = dice
-            save_checkpoint({'epoch': i_iter,
-                             'state_dict': model.state_dict(),
-                             'best_pre': best_pre},
-                              is_best, 
-                              args.save, 
-                              args.arch)
-
-        if i_iter % args.save_pred_every == 0 and i_iter!=0:
-            logging.info('saving checkpoing ...')
-            save_checkpoint({'epoch': i_iter,
-                             'state_dict': model.state_dict(),
-                             'best_pre': 0.},
-                              False, 
-                              args.save, 
-                              args.arch)
-            torch.save(model_D.state_dict(),os.path.join(args.save, 'abus'+str(i_iter)+'_D.pth'))
+                save_checkpoint({'epoch': i_iter,
+                                 'state_dict': model.state_dict(),
+                                 'best_pre': best_pre},
+                                  is_best, 
+                                  args.save, 
+                                  args.arch)
+        #if i_iter % args.save_pred_every == 0 and i_iter!=0:
+        #    logging.info('saving checkpoing ...')
+        #    save_checkpoint({'epoch': i_iter,
+        #                     'state_dict': model.state_dict(),
+        #                     'best_pre': 0.},
+        #                      False, 
+        #                      args.save, 
+        #                      args.arch)
+        #    torch.save(model_D.state_dict(),os.path.join(args.save, 'abus'+str(i_iter)+'_D.pth'))
 
 def val(epoch, model, val_loader):
     model.eval()
