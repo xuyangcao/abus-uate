@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '2,3' 
 import sys
 import argparse 
 import shutil
@@ -54,7 +54,7 @@ def get_args():
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture 
 
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
 
     # frequently change args
     parser.add_argument('--log_dir', default='./log/methods')

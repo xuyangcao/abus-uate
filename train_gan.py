@@ -51,7 +51,7 @@ def get_args():
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
 
     # args for semi_gan
     parser.add_argument('--semi_start', default=3, type=int)

@@ -47,7 +47,7 @@ def get_args():
     parser.add_argument('--gpu_idx', default=0, type=int)
     parser.add_argument('--seed', default=6, type=int) 
 
-    parser.add_argument('--n_epochs', type=int, default=80)
+    parser.add_argument('--n_epochs', type=int, default=60)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
@@ -58,7 +58,7 @@ def get_args():
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture 
 
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
     parser.add_argument('--ema_decay', type=float,  default=0.99, help='ema_decay')
     parser.add_argument('--consistency', type=float,  default=0.1, help='consistency')
     parser.add_argument('--consistency_rampup', type=float,  default=40.0, help='consistency_rampup')
