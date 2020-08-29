@@ -51,6 +51,7 @@ def get_args():
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
     parser.add_argument('--max_val', default=1., type=float) # maxmum of ramp-up function 
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
+    parser.add_argument('--time', '-T', default=2, type=int) # T in uncertain
 
     parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
@@ -211,7 +212,7 @@ def main():
                                   return_index=True, 
                                   worker_init_fn=worker_init_fn, 
                                   **kwargs) # set return_index==true 
-        oukputs, losses, sup_losses, unsup_losses, w, uncertain = train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs)
+        oukputs, losses, sup_losses, unsup_losses, w, uncertain = train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=args.time)
         if args.is_uncertain:
             alpha = (1 - uncertain) * args.alpha_psudo + uncertain
         else:
