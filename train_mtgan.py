@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
 import sys
 import tqdm
 import argparse
@@ -43,8 +43,8 @@ def get_arguments():
     parser.add_argument('--root_path', default='../data/', type=str)
     parser.add_argument('--seed', default=6, type=int) 
 
-    parser.add_argument('--batch_size', type=int, default=8)
-    parser.add_argument('--ngpu', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=10)
+    parser.add_argument('--ngpu', type=int, default=2)
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
@@ -52,14 +52,14 @@ def get_arguments():
     parser.add_argument("--num_classes", type=int, default=2)
 
     parser.add_argument("--lr", type=float, default=3e-5)
-    parser.add_argument("--lr_D", type=float, default=1e-3)
+    parser.add_argument("--lr_D", type=float, default=1e-6)
     parser.add_argument("--weight_decay", type=float, default=1e-8)
     parser.add_argument("--momentum", type=float, default=0.9)
 
     parser.add_argument("--lambda_adv", type=float, default=0.01)
     parser.add_argument("--lambda_fm", type=float, default=0.1)
     parser.add_argument("--lambda_st", type=float, default=1.0)
-    parser.add_argument("--threshold_st", type=float, default=0.6)
+    parser.add_argument("--threshold_st", type=float, default=0.5)
 
     parser.add_argument('--ema_decay', type=float,  default=0.99, help='ema_decay')
     parser.add_argument('--consistency', type=float,  default=0.1, help='consistency')
@@ -256,19 +256,22 @@ def main():
                        transform=val_transform
                        )
     batch_size = args.ngpu * args.batch_size 
+    batch_size_label = round(batch_size * 0.2) 
+    batch_size_unlabel = batch_size - batch_size_label 
+
     def worker_init_fn(worker_id):
         random.seed(args.seed+worker_id)
     kwargs = {'num_workers': 4, 'pin_memory': True, 'worker_init_fn': worker_init_fn} 
     trainloader = DataLoader(train_set_label, 
-                              batch_size=batch_size, 
+                              batch_size=batch_size_label, 
                               shuffle=True, 
                               **kwargs)
     trainloader_remain = DataLoader(train_set_unlabel, 
-                              batch_size=batch_size, 
+                              batch_size=batch_size_unlabel, 
                               shuffle=True, 
                               **kwargs)
     trainloader_gt = DataLoader(train_set_label, 
-                              batch_size=batch_size, 
+                              batch_size=batch_size_label, 
                               shuffle=True, 
                               **kwargs)
     val_loader = DataLoader(val_set, 
@@ -325,11 +328,11 @@ def main():
 
         images_l_norm = images_l * 0.5 + 0.5
         pred_l_cat = torch.cat((pred_l, images_l_norm[:, 0:1, ...]), dim=1)
-        D_out_labeled, _ = model_D(pred_l_cat)
+        D_out_labeled, D_out_labeled_feature = model_D(pred_l_cat)
 
         images_remain_norm = images_remain * 0.5 + 0.5
         pred_ul_cat = torch.cat((pred_remain, images_remain_norm[:, 0:1, ...]), dim=1)
-        D_out_ul, _ = model_D(pred_ul_cat) 
+        D_out_ul, D_out_ul_feature = model_D(pred_ul_cat) 
 
         D_out_all = torch.cat((D_out_labeled, D_out_ul), dim=0)
         label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
@@ -346,9 +349,43 @@ def main():
 
         loss_unsuper = F.mse_loss(pred_all, ema_out)
 
-        # 1.4 total G loss
+        # 1.2.1 show predictions of unlabeled data
+        with torch.no_grad():
+            padding = 10
+            nrow = 4
+            if i_iter % 20 == 0:
+                img = make_grid(images_remain_norm, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
+                gt = torch.max(ema_out.cpu(), dim=1, keepdim=True)[1]
+                gt = gt.float()
+                gt = gt[batch_size_label:]
+                #print('gt: ', gt.shape)
+                gt = make_grid(gt, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+                gt_img = label2rgb(gt, img, bg_label=0)
+
+                #print('pred_remain: ', pred_remain.shape)
+                pre = torch.max(pred_remain.cpu(), dim=1, keepdim=True)[1]
+                pre = pre.float()
+                pre = make_grid(pre, nrow=nrow, padding=padding).numpy().transpose(1, 2, 0)[:, :, 0]
+                pre_img = label2rgb(pre, img, bg_label=0)
+
+                fig = plt.figure()
+                ax = fig.add_subplot(211)
+                ax.imshow(gt_img)
+                ax.set_title('pseudo_labels')
+                ax = fig.add_subplot(212)
+                ax.imshow(pre_img)
+                ax.set_title('unlabeled_prediction')
+                fig.tight_layout() 
+                writer.add_figure('train_unlabeled_results', fig, i_iter)
+                fig.clear()
+
+        # 1.4 feature matching loss
+        #loss_fm = torch.mean(torch.abs(torch.mean(D_out_labeled_feature, 0) - torch.mean(D_out_ul_feature, 0)))
+
+        # 1.5 total G loss
         w_ul = args.consistency * sigmoid_rampup(i_iter, args.consistency_rampup)
         writer.add_scalar('train_Wul', w_ul, i_iter)
+        #loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper + args.lambda_fm * loss_fm
         loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper
 
         optimizer.zero_grad()
@@ -360,47 +397,47 @@ def main():
         for param in model_D.parameters():
             param.requires_grad = True
 
-        try:
-            _, batch_gt = next(trainloader_gt_iter)
-        except:
-            trainloader_gt_iter = enumerate(trainloader_gt)
-            _, batch_gt = next(trainloader_gt_iter)
+        #try:
+        #    _, batch_gt = next(trainloader_gt_iter)
+        #except:
+        #    trainloader_gt_iter = enumerate(trainloader_gt)
+        #    _, batch_gt = next(trainloader_gt_iter)
 
         # 2.1 train with gt
         # use new images and lables
-        images_gt, labels_gt = batch_gt['image'], batch_gt['target']
-        images_gt = images_gt * 0.5 + 0.5
-        images_gt = images_gt.cuda()
-        labels_gt = labels_gt.squeeze(axis=1)
-        gt_onehot = Variable(one_hot(labels_gt)).cuda()
-        gt_cat = torch.cat((gt_onehot, images_gt[:, 0:1, ...]), dim=1)
-        D_out_gt , _ = model_D(gt_cat)
-        print('Dout_real: ', D_out_gt.detach().cpu().numpy().flatten())
-        y_real_ = Variable(torch.ones(D_out_gt.size(0), 1).cuda()) 
-        loss_D_real = criterion(D_out_gt, y_real_)
-
-        # use existing images and labels
-        #labels_gt = labels_l.squeeze(axis=1) 
+        #images_gt, labels_gt = batch_gt['image'], batch_gt['target']
+        #images_gt = images_gt * 0.5 + 0.5
+        #images_gt = images_gt.cuda()
+        #labels_gt = labels_gt.squeeze(axis=1)
         #gt_onehot = Variable(one_hot(labels_gt)).cuda()
-        #gt_cat = torch.cat((gt_onehot, images_l_norm[:, 0:1, ...]), dim=1)
+        #gt_cat = torch.cat((gt_onehot, images_gt[:, 0:1, ...]), dim=1)
         #D_out_gt , _ = model_D(gt_cat)
         #print('Dout_real: ', D_out_gt.detach().cpu().numpy().flatten())
         #y_real_ = Variable(torch.ones(D_out_gt.size(0), 1).cuda()) 
         #loss_D_real = criterion(D_out_gt, y_real_)
+
+        # use existing images and labels
+        labels_gt = labels_l.squeeze(axis=1) 
+        gt_onehot = Variable(one_hot(labels_gt)).cuda()
+        gt_cat = torch.cat((gt_onehot, images_l_norm[:, 0:1, ...]), dim=1)
+        D_out_gt, _ = model_D(gt_cat)
+        print('Dout_real: ', D_out_gt.detach().cpu().numpy().flatten())
+        y_real_ = Variable(torch.ones(D_out_gt.size(0), 1).cuda()) 
+        loss_D_real = criterion(D_out_gt, y_real_)
         
         # 2.2 train with pred
         # use unlabeled data
-        D_out_ul_, _ = model_D(pred_ul_cat.detach())
-        print('Dout_fake: ', D_out_ul_.detach().cpu().numpy().flatten())
-        y_fake_ = Variable(torch.zeros(D_out_ul_.size(0), 1).cuda())
-        loss_D_fake = criterion(D_out_ul_, y_fake_) 
+        #D_out_ul_, _ = model_D(pred_ul_cat.detach())
+        #print('Dout_fake: ', D_out_ul_.detach().cpu().numpy().flatten())
+        #y_fake_ = Variable(torch.zeros(D_out_ul_.size(0), 1).cuda())
+        #loss_D_fake = criterion(D_out_ul_, y_fake_) 
 
         # use labeled and unlabeled data
-        #pred_all_cat = torch.cat((pred_l_cat, pred_ul_cat), dim=0).detach()
-        #D_out_all_, _ = model_D(pred_all_cat) 
-        #print('Dout_fake: ', D_out_all_.detach().cpu().numpy().flatten())
-        #y_fake_ = Variable(torch.zeros(pred_all_cat.size(0), 1).cuda())
-        #loss_D_fake = criterion(D_out_all_, y_fake_) 
+        pred_all_cat = torch.cat((pred_l_cat, pred_ul_cat), dim=0).detach()
+        D_out_all_, _ = model_D(pred_all_cat) 
+        print('Dout_fake: ', D_out_all_.detach().cpu().numpy().flatten())
+        y_fake_ = Variable(torch.zeros(pred_all_cat.size(0), 1).cuda())
+        loss_D_fake = criterion(D_out_all_, y_fake_) 
 
         loss_D = (loss_D_fake + loss_D_real) / 2.0
         optimizer_D.zero_grad()
@@ -410,13 +447,14 @@ def main():
         # show losses and save model
         writer.add_scalar('train_loss_super', loss_super.item(), i_iter)
         writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
-        writer.add_scalar('train_loss_unsuper', loss_unsuper.item(), i_iter)
+        writer.add_scalar('train_loss_unsuper', w_ul*loss_unsuper.item(), i_iter)
+        #writer.add_scalar('train_loss_fm', loss_fm.item(), i_iter)
         writer.add_scalar('train_loss_G', loss_G.item(), i_iter)
         writer.add_scalar('train_loss_D', loss_D.item(), i_iter)
 
         logging.info('=== iter: {} ==='.format(i_iter))
-        if (i_iter+1) % 2000 == 0:
-            dice = val(i_iter, model, val_loader)
+        if (i_iter) % 2000 == 0:
+            dice = val(i_iter, ema_model, val_loader)
             # save best checkpoint
             is_best = False
             if dice > best_pre:
