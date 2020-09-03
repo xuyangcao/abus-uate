@@ -157,34 +157,24 @@ def one_hot(label):
     #handle ignore labels
     return torch.FloatTensor(one_hot)
 
-def compute_argmax_map(output):
-    output = output.detach().cpu().numpy()
-    output = output.transpose((1,2,0))
-    output = np.asarray(np.argmax(output, axis=2), dtype=np.int)
-    output = torch.from_numpy(output).float()
-    return output
-     
-def find_good_maps(D_outs, pred_all, img_all):
-    count = 0
-    for i in range(D_outs.size(0)):
-        if D_outs[i] > args.threshold_st:
-            count +=1
+def get_good_maps(D_outs, pred, image):
+    out = D_outs.cpu().detach().numpy().flatten()
+    count = sum(out > args.threshold_st)
+    if count:
+        logging.info('=== Above ST-Threshold : {} / {} ==='.format(count, args.batch_size*args.ngpu))
+        pred_sel = torch.Tensor(count, pred.size(1), pred.size(2), pred.size(3))
+        img_sel = torch.Tensor(count, image.size(1), image.size(2), image.size(3))
 
-    if count > 0:
-        logging.info('=== Above ST-Threshold : {} / {} ==='.format(count, args.batch_size))
-        pred_sel = torch.Tensor(count, pred_all.size(1), pred_all.size(2), pred_all.size(3))
-        label_sel = torch.Tensor(count, pred_sel.size(2), pred_sel.size(3))
-        img_sel = torch.Tensor(count, img_all.size(1), img_all.size(2), img_all.size(3))
         num_sel = 0 
         for j in range(D_outs.size(0)):
             if D_outs[j] > args.threshold_st:
-                pred_sel[num_sel] = pred_all[j]
-                label_sel[num_sel] = compute_argmax_map(pred_all[j])
-                img_sel[num_sel] = img_all[j]
-                num_sel +=1
-        return  pred_sel.cuda(), label_sel.cuda(), count, img_sel.cuda()
+                pred_sel[num_sel] = pred[j]
+                img_sel[num_sel] = image[j]
+                num_sel += 1
+        return count, pred_sel.cuda(), img_sel.cuda()
+
     else:
-        return 0, 0, count, 0 
+        return count, 0, 0
 
 def gaussian_noise(x, mean=0, std=0.03):
     noise = torch.zeros(x.shape)
@@ -341,13 +331,20 @@ def main():
         # 1.3 unsuper seg loss
         images_all = torch.cat((images_l, images_remain), dim=0)
         pred_all = torch.cat((pred_l, pred_remain), dim=0)
-
         with torch.no_grad():
             ema_input = gaussian_noise(images_all)
             ema_out = ema_model(ema_input)
             ema_out = F.softmax(ema_out, dim=1)
 
-        loss_unsuper = F.mse_loss(pred_all, ema_out)
+        images_all_norm = images_all * 0.5 + 0.5
+        emainput_D = torch.cat((pred_all, images_all_norm[:, 0:1, ...]), dim=1)
+        D_emaout, _ = model_D(emainput_D)
+
+        count, pred_sel, ema_out_sel = get_good_maps(D_emaout, pred_all, ema_out)
+        if count > 0 and i_iter > 1000:
+            loss_unsuper = F.mse_loss(pred_sel, ema_out_sel) #only use good results for ul
+        else:
+            loss_unsuper = 0.0
 
         # 1.2.1 show predictions of unlabeled data
         with torch.no_grad():
@@ -447,7 +444,7 @@ def main():
         # show losses and save model
         writer.add_scalar('train_loss_super', loss_super.item(), i_iter)
         writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
-        writer.add_scalar('train_loss_unsuper', w_ul*loss_unsuper.item(), i_iter)
+        writer.add_scalar('train_loss_unsuper', w_ul*loss_unsuper, i_iter)
         #writer.add_scalar('train_loss_fm', loss_fm.item(), i_iter)
         writer.add_scalar('train_loss_G', loss_G.item(), i_iter)
         writer.add_scalar('train_loss_D', loss_D.item(), i_iter)
