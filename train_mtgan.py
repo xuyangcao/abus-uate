@@ -368,7 +368,7 @@ def main():
             ema_out = F.softmax(ema_out, dim=1)
 
         images_all_norm = images_all * 0.5 + 0.5
-        emainput_D = torch.cat((pred_all, images_all_norm[:, 0:1, ...]), dim=1)
+        emainput_D = torch.cat((ema_out, images_all_norm[:, 0:1, ...]), dim=1)
         D_emaout, _ = model_D(emainput_D)
 
         count, pred_sel, ema_out_sel, image_norm_sel = get_good_maps(D_emaout, pred_all, ema_out, images_all_norm)
