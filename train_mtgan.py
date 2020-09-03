@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import sys
 import tqdm
 import argparse
@@ -44,7 +44,7 @@ def get_arguments():
     parser.add_argument('--seed', default=6, type=int) 
 
     parser.add_argument('--batch_size', type=int, default=10)
-    parser.add_argument('--ngpu', type=int, default=2)
+    parser.add_argument('--ngpu', type=int, default=1)
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
@@ -157,30 +157,61 @@ def one_hot(label):
     #handle ignore labels
     return torch.FloatTensor(one_hot)
 
-def get_good_maps(D_outs, pred, image):
+def get_good_maps(D_outs, pred, ema_out, image):
     out = D_outs.cpu().detach().numpy().flatten()
     count = sum(out > args.threshold_st)
     if count:
         logging.info('=== Above ST-Threshold : {} / {} ==='.format(count, args.batch_size*args.ngpu))
         pred_sel = torch.Tensor(count, pred.size(1), pred.size(2), pred.size(3))
+        ema_out_sel = torch.Tensor(count, ema_out.size(1), ema_out.size(2), ema_out.size(3))
         img_sel = torch.Tensor(count, image.size(1), image.size(2), image.size(3))
 
         num_sel = 0 
         for j in range(D_outs.size(0)):
             if D_outs[j] > args.threshold_st:
                 pred_sel[num_sel] = pred[j]
+                ema_out_sel[num_sel] = ema_out[j]
                 img_sel[num_sel] = image[j]
                 num_sel += 1
-        return count, pred_sel.cuda(), img_sel.cuda()
+        return count, pred_sel.cuda(), ema_out_sel.cuda(), img_sel.cuda()
 
     else:
-        return count, 0, 0
+        return count, 0, 0, 0
 
 def gaussian_noise(x, mean=0, std=0.03):
     noise = torch.zeros(x.shape)
     noise.data.normal_(mean, std)
     noise = noise.cuda()
     return x + noise
+
+def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
+    with torch.no_grad():
+        padding = 10
+        nrow = 4
+
+        img = make_grid(images, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
+        gt = torch.max(gt.cpu(), dim=1, keepdim=True)[1]
+        gt = gt.float()
+        #gt = gt[batch_size_label:]
+        gt = make_grid(gt, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+        gt_img = label2rgb(gt, img, bg_label=0)
+
+        #print('pred_remain: ', pred_remain.shape)
+        pre = torch.max(pred.cpu(), dim=1, keepdim=True)[1]
+        pre = pre.float()
+        pre = make_grid(pre, nrow=nrow, padding=padding).numpy().transpose(1, 2, 0)[:, :, 0]
+        pre_img = label2rgb(pre, img, bg_label=0)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(211)
+        ax.imshow(gt_img)
+        ax.set_title(label_gt)
+        ax = fig.add_subplot(212)
+        ax.imshow(pre_img)
+        ax.set_title(label_pre)
+        fig.tight_layout() 
+        writer.add_figure(label_fig, fig, i_iter)
+        fig.clear()
 
 def main():
     #####################
@@ -340,41 +371,26 @@ def main():
         emainput_D = torch.cat((pred_all, images_all_norm[:, 0:1, ...]), dim=1)
         D_emaout, _ = model_D(emainput_D)
 
-        count, pred_sel, ema_out_sel = get_good_maps(D_emaout, pred_all, ema_out)
+        count, pred_sel, ema_out_sel, image_norm_sel = get_good_maps(D_emaout, pred_all, ema_out, images_all_norm)
         if count > 0 and i_iter > 1000:
             loss_unsuper = F.mse_loss(pred_sel, ema_out_sel) #only use good results for ul
         else:
             loss_unsuper = 0.0
 
-        # 1.2.1 show predictions of unlabeled data
-        with torch.no_grad():
-            padding = 10
-            nrow = 4
-            if i_iter % 20 == 0:
-                img = make_grid(images_remain_norm, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
-                gt = torch.max(ema_out.cpu(), dim=1, keepdim=True)[1]
-                gt = gt.float()
-                gt = gt[batch_size_label:]
-                #print('gt: ', gt.shape)
-                gt = make_grid(gt, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                gt_img = label2rgb(gt, img, bg_label=0)
-
-                #print('pred_remain: ', pred_remain.shape)
-                pre = torch.max(pred_remain.cpu(), dim=1, keepdim=True)[1]
-                pre = pre.float()
-                pre = make_grid(pre, nrow=nrow, padding=padding).numpy().transpose(1, 2, 0)[:, :, 0]
-                pre_img = label2rgb(pre, img, bg_label=0)
-
-                fig = plt.figure()
-                ax = fig.add_subplot(211)
-                ax.imshow(gt_img)
-                ax.set_title('pseudo_labels')
-                ax = fig.add_subplot(212)
-                ax.imshow(pre_img)
-                ax.set_title('unlabeled_prediction')
-                fig.tight_layout() 
-                writer.add_figure('train_unlabeled_results', fig, i_iter)
-                fig.clear()
+        # 1.2.1 show predictions of unlabeled data and selected data
+        if i_iter % 20 == 0:
+            show_results(images_remain_norm, ema_out[batch_size_label:], pred_remain, 
+                         label_gt='pseudo_labels', 
+                         label_pre='prediction', 
+                         label_fig='train_unlabeled_results',
+                         i_iter=i_iter 
+                         )
+            if count:
+                show_results(image_norm_sel, ema_out_sel, pred_sel,
+                             label_gt='pseudo_labels',
+                             label_pre='prediction',
+                             label_fig='train_selsected_results',
+                             i_iter=i_iter)
 
         # 1.4 feature matching loss
         #loss_fm = torch.mean(torch.abs(torch.mean(D_out_labeled_feature, 0) - torch.mean(D_out_ul_feature, 0)))
