@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import sys
 import tqdm
 import argparse
@@ -52,7 +52,7 @@ def get_arguments():
     parser.add_argument("--num_classes", type=int, default=2)
 
     parser.add_argument("--lr", type=float, default=3e-5)
-    parser.add_argument("--lr_D", type=float, default=1e-6)
+    parser.add_argument("--lr_D", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-8)
     parser.add_argument("--momentum", type=float, default=0.9)
 
@@ -190,13 +190,12 @@ def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
         nrow = 4
 
         img = make_grid(images, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
+
         gt = torch.max(gt.cpu(), dim=1, keepdim=True)[1]
         gt = gt.float()
-        #gt = gt[batch_size_label:]
         gt = make_grid(gt, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
         gt_img = label2rgb(gt, img, bg_label=0)
 
-        #print('pred_remain: ', pred_remain.shape)
         pre = torch.max(pred.cpu(), dim=1, keepdim=True)[1]
         pre = pre.float()
         pre = make_grid(pre, nrow=nrow, padding=padding).numpy().transpose(1, 2, 0)[:, :, 0]
@@ -291,16 +290,11 @@ def main():
                               batch_size=batch_size_unlabel, 
                               shuffle=True, 
                               **kwargs)
-    trainloader_gt = DataLoader(train_set_label, 
-                              batch_size=batch_size_label, 
-                              shuffle=True, 
-                              **kwargs)
     val_loader = DataLoader(val_set, 
                             batch_size=1, 
                             shuffle=False,
                             **kwargs)
     trainloader_iter = enumerate(trainloader)
-    trainloader_gt_iter = enumerate(trainloader_gt)
 
     #####################
     # optimizer & loss  #
@@ -410,26 +404,7 @@ def main():
         for param in model_D.parameters():
             param.requires_grad = True
 
-        #try:
-        #    _, batch_gt = next(trainloader_gt_iter)
-        #except:
-        #    trainloader_gt_iter = enumerate(trainloader_gt)
-        #    _, batch_gt = next(trainloader_gt_iter)
-
         # 2.1 train with gt
-        # use new images and lables
-        #images_gt, labels_gt = batch_gt['image'], batch_gt['target']
-        #images_gt = images_gt * 0.5 + 0.5
-        #images_gt = images_gt.cuda()
-        #labels_gt = labels_gt.squeeze(axis=1)
-        #gt_onehot = Variable(one_hot(labels_gt)).cuda()
-        #gt_cat = torch.cat((gt_onehot, images_gt[:, 0:1, ...]), dim=1)
-        #D_out_gt , _ = model_D(gt_cat)
-        #print('Dout_real: ', D_out_gt.detach().cpu().numpy().flatten())
-        #y_real_ = Variable(torch.ones(D_out_gt.size(0), 1).cuda()) 
-        #loss_D_real = criterion(D_out_gt, y_real_)
-
-        # use existing images and labels
         labels_gt = labels_l.squeeze(axis=1) 
         gt_onehot = Variable(one_hot(labels_gt)).cuda()
         gt_cat = torch.cat((gt_onehot, images_l_norm[:, 0:1, ...]), dim=1)
@@ -439,13 +414,6 @@ def main():
         loss_D_real = criterion(D_out_gt, y_real_)
         
         # 2.2 train with pred
-        # use unlabeled data
-        #D_out_ul_, _ = model_D(pred_ul_cat.detach())
-        #print('Dout_fake: ', D_out_ul_.detach().cpu().numpy().flatten())
-        #y_fake_ = Variable(torch.zeros(D_out_ul_.size(0), 1).cuda())
-        #loss_D_fake = criterion(D_out_ul_, y_fake_) 
-
-        # use labeled and unlabeled data
         pred_all_cat = torch.cat((pred_l_cat, pred_ul_cat), dim=0).detach()
         D_out_all_, _ = model_D(pred_all_cat) 
         print('Dout_fake: ', D_out_all_.detach().cpu().numpy().flatten())
