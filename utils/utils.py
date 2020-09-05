@@ -14,7 +14,7 @@ from skimage.transform import resize
 
 def one_hot(gt):
     gt = gt.long()
-    gt_one_hot = torch.eye(2)[gt]
+    gt_one_hot = torch.eye(2)[gt.squeeze(1)]
     gt_one_hot = gt_one_hot.permute(0, 3, 1, 2).float()
     if gt.cuda:
         gt_one_hot = gt_one_hot.cuda()
