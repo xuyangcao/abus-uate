@@ -52,6 +52,7 @@ def get_args():
     parser.add_argument('--max_val', default=1., type=float) # maxmum of ramp-up function 
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
     parser.add_argument('--time', '-T', default=2, type=int) # T in uncertain
+    parser.add_argument('--consis_method', default='soft', type=str, choices=('soft', 'hard')
 
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
     parser.add_argument('--uncertain_map', default='epis', type=str, choices=('epis', 'alec', 'mix', '')) # max epoch of weight schedualer 
@@ -339,7 +340,11 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
         sup_loss, n_sup = loss_fn['mask_dice_loss'](out, target)
         
         # unsuper loss
-        zcomp = psuedo_target
+        if epoch > 9 and args.consis_method == 'hard':
+            zcomp = torch.max(psuedo_target, dim=1, keepdim=True)[1]
+        else:
+            zcomp = psuedo_target
+        threshold = 0.15
         if args.is_uncertain:
             unsup_loss = loss_fn['mask_mse_loss'](out, zcomp, uncertain_temp, th=threshold)
         else:
@@ -477,9 +482,9 @@ def val(epoch):
         return np.mean(mean_dice)
 
 def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
-    print(images.min())
-    print(gt.min())
-    print(pred.min())
+    #print(images.min())
+    #print(gt.min())
+    #print(pred.min())
     with torch.no_grad():
         padding = 10
         nrow = 4
