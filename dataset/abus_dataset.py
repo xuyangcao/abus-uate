@@ -12,7 +12,7 @@ import torchvision.transforms as transforms
 
 import Augmentor
 
-__all__ = ['ElasticTransform', 'Normalize', 'ToTensor', 'ABUS_2D']
+__all__ = ['ElasticTransform', 'Normalize', 'ToTensor', 'GenerateMask', 'ABUS_2D']
 
 
 class ABUS_2D(Dataset):
@@ -146,6 +146,24 @@ class ABUS_2D(Dataset):
 
         return img 
 
+class GenerateMask(object):
+    def __init__(self, mode='train', shape=(512, 128), mask_shape=(32, 32)):
+        self._mode = mode
+        self._shape = shape
+        self._mask_shape = mask_shape
+
+    def __call__(self, sample):
+        if self._mode == 'train':
+            image = sample['image']
+            #print('gen mask in dataset')
+            # gen mask 
+            mask = np.ones((1, image.shape[0], image.shape[1]), dtype=np.float32)
+            x_start = randint(0, self._shape[0]-self._mask_shape[0])
+            y_start = randint(0, self._shape[1]-self._mask_shape[1])
+            mask[x_start:x_start+self._mask_shape[0], y_start:y_start+self._mask_shape[1]] = 0.
+
+            sample['mask'] = mask
+            return sample
 
 class ElasticTransform(object):
     def __init__(self, mode='train', shape=(512, 128)):
@@ -184,8 +202,9 @@ class Normalize(object):
 
 
 class ToTensor(object):
-    def __init__(self, mode='train'):
+    def __init__(self, mode='train', gen_mask=False):
         self._mode = mode
+        self._gen_mask = gen_mask
     
     def __call__(self, sample):
         if self._mode == 'train' or self._mode == 'test' or self._mode == 'val':
@@ -198,7 +217,18 @@ class ToTensor(object):
             # transverse tensor to 0~1 
             if isinstance(image, torch.ByteTensor): 
                 image = image.float().div(255)
-            return {'image':image, 'target':torch.from_numpy(target.astype(np.float32))}
+
+
+            sample['image'] = image
+            sample['target'] = torch.from_numpy(target.astype(np.float32))
+            if 'mask' in sample:
+                mask = sample['mask']
+                mask = torch.from_numpy(mask)
+                sample['mask'] = mask
+                return sample
+            else:
+                return {'image':image, 'target':torch.from_numpy(target.astype(np.float32))}
+    
         else:
             raise(RuntimeError('error in ElasticTransform'))
 
