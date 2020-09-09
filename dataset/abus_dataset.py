@@ -147,7 +147,7 @@ class ABUS_2D(Dataset):
         return img 
 
 class GenerateMask(object):
-    def __init__(self, mode='train', shape=(512, 128), mask_shape=(32, 32)):
+    def __init__(self, mode='train', shape=(512, 128), mask_shape=(64, 64)):
         self._mode = mode
         self._shape = shape
         self._mask_shape = mask_shape
@@ -155,12 +155,11 @@ class GenerateMask(object):
     def __call__(self, sample):
         if self._mode == 'train':
             image = sample['image']
-            #print('gen mask in dataset')
             # gen mask 
             mask = np.ones((1, image.shape[0], image.shape[1]), dtype=np.float32)
-            x_start = randint(0, self._shape[0]-self._mask_shape[0])
-            y_start = randint(0, self._shape[1]-self._mask_shape[1])
-            mask[x_start:x_start+self._mask_shape[0], y_start:y_start+self._mask_shape[1]] = 0.
+            x_start = randint(0, self._shape[1]-self._mask_shape[1])
+            y_start = randint(0, self._shape[0]-self._mask_shape[0])
+            mask[:, x_start:(x_start+self._mask_shape[0]), y_start:(y_start+self._mask_shape[1])] = 0.
 
             sample['mask'] = mask
             return sample

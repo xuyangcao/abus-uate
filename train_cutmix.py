@@ -52,7 +52,7 @@ def get_arguments():
     parser.add_argument("--num_classes", type=int, default=2)
 
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--weight_decay", type=float, default=1e-8)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
 
     parser.add_argument("--lambda_adv", type=float, default=0.01)
     parser.add_argument("--lambda_fm", type=float, default=0.1)
@@ -98,7 +98,7 @@ if os.path.exists(log_dir):
 writer = SummaryWriter(log_dir)
 
 # set title of the current process
-setproctitle.setproctitle('xuyangcao')
+setproctitle.setproctitle('...')
 
 # random
 cudnn.enabled = True
@@ -340,6 +340,7 @@ def main():
         cons_stu = F.softmax(cons_stu, dim=1)
         loss_unsuper = F.mse_loss(cons_stu, cons_tea)
 
+        # show results
         image_mixed = ux_mixed * 0.5 + 0.5
         if i_iter % 50 == 0:
             show_results(image_mixed, cons_tea, cons_stu, 
