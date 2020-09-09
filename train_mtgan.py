@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 import sys
 import tqdm
 import argparse
@@ -44,16 +44,16 @@ def get_arguments():
     parser.add_argument('--seed', default=6, type=int) 
 
     parser.add_argument('--batch_size', type=int, default=10)
-    parser.add_argument('--ngpu', type=int, default=1)
+    parser.add_argument('--ngpu', type=int, default=2)
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
     parser.add_argument("--num_classes", type=int, default=2)
 
-    parser.add_argument("--lr", type=float, default=3e-5)
-    parser.add_argument("--lr_D", type=float, default=1e-4)
-    parser.add_argument("--weight_decay", type=float, default=1e-8)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr_D", type=float, default=1e-5)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
 
     parser.add_argument("--lambda_adv", type=float, default=0.01)
@@ -62,8 +62,8 @@ def get_arguments():
     parser.add_argument("--threshold_st", type=float, default=0.5)
 
     parser.add_argument('--ema_decay', type=float,  default=0.99, help='ema_decay')
-    parser.add_argument('--consistency', type=float,  default=0.1, help='consistency')
-    parser.add_argument('--consistency_rampup', type=float,  default=5000.0, help='consistency_rampup')
+    parser.add_argument('--max_val', type=float,  default=1, help='consistency')
+    parser.add_argument('--consistency_rampup', type=float,  default=10000.0, help='consistency_rampup')
 
     parser.add_argument("--num-steps", type=int, default=40000)
     # frequently change args
@@ -360,37 +360,39 @@ def main():
             ema_input = gaussian_noise(images_all)
             ema_out = ema_model(ema_input)
             ema_out = F.softmax(ema_out, dim=1)
+        loss_unsuper =  F.mse_loss(pred_all, ema_out)
 
-        images_all_norm = images_all * 0.5 + 0.5
-        emainput_D = torch.cat((ema_out, images_all_norm[:, 0:1, ...]), dim=1)
-        D_emaout, _ = model_D(emainput_D)
+        #images_all_norm = images_all * 0.5 + 0.5
+        #emainput_D = torch.cat((ema_out, images_all_norm[:, 0:1, ...]), dim=1)
+        #D_emaout, _ = model_D(emainput_D)
 
-        count, pred_sel, ema_out_sel, image_norm_sel = get_good_maps(D_emaout, pred_all, ema_out, images_all_norm)
-        if count > 0 and i_iter > 1000:
-            loss_unsuper = F.mse_loss(pred_sel, ema_out_sel) #only use good results for ul
-        else:
-            loss_unsuper = 0.0
+        #count, pred_sel, ema_out_sel, image_norm_sel = get_good_maps(D_emaout, pred_all, ema_out, images_all_norm)
+        #if count > 0 and i_iter > 1000:
+        #    loss_unsuper = F.mse_loss(pred_sel, ema_out_sel) #only use good results for ul
+        #else:
+        #    loss_unsuper = 0.0
 
         # 1.2.1 show predictions of unlabeled data and selected data
+        images_all_norm = images_all * 0.5 + 0.5
         if i_iter % 20 == 0:
-            show_results(images_remain_norm, ema_out[batch_size_label:], pred_remain, 
+            show_results(images_all_norm, ema_out, pred_all, 
                          label_gt='pseudo_labels', 
                          label_pre='prediction', 
                          label_fig='train_unlabeled_results',
                          i_iter=i_iter 
                          )
-            if count:
-                show_results(image_norm_sel, ema_out_sel, pred_sel,
-                             label_gt='pseudo_labels',
-                             label_pre='prediction',
-                             label_fig='train_selsected_results',
-                             i_iter=i_iter)
+            #if count:
+            #    show_results(image_norm_sel, ema_out_sel, pred_sel,
+            #                 label_gt='pseudo_labels',
+            #                 label_pre='prediction',
+            #                 label_fig='train_selsected_results',
+            #                 i_iter=i_iter)
 
         # 1.4 feature matching loss
         #loss_fm = torch.mean(torch.abs(torch.mean(D_out_labeled_feature, 0) - torch.mean(D_out_ul_feature, 0)))
 
         # 1.5 total G loss
-        w_ul = args.consistency * sigmoid_rampup(i_iter, args.consistency_rampup)
+        w_ul = args.max_val * sigmoid_rampup(i_iter, args.consistency_rampup)
         writer.add_scalar('train_Wul', w_ul, i_iter)
         #loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper + args.lambda_fm * loss_fm
         loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper
