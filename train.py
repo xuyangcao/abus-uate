@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '2' 
 import sys
 import argparse 
 import shutil
@@ -62,8 +62,8 @@ def get_args():
     # frequently change args
     parser.add_argument('--is_uncertain', default=False, action='store_true') 
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--log_dir', default='./log/semi')
-    parser.add_argument('--save', default='./work/semi/test')
+    parser.add_argument('--log_dir', default='./log/methods_2')
+    parser.add_argument('--save', default='./work/methods_2/test')
 
     args = parser.parse_args()
 

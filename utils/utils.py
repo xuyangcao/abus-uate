@@ -77,13 +77,15 @@ def draw_results(img, label, pred):
 
     return img
 
-def save_checkpoint(state, is_best, path, prefix, filename='checkpoint.pth.tar'):
-    filename = 'checkpoint_' + str(state['epoch']) + '.pth.tar'
-    prefix_save = os.path.join(path, prefix)
-    name = prefix_save + '_' + filename
-    torch.save(state, name)
+def save_checkpoint(state, is_best, path, arch, filename='checkpoint.pth.tar'):
+    #filename = 'checkpoint_' + str(state['epoch']) + '.pth.tar'
+    filename = 'checkpoint.pth.tar'
+    prefix_save = os.path.join(path, arch)
+    checkpoint_name = prefix_save + '_' + filename
+    torch.save(state, checkpoint_name)
+
     if is_best:
-        shutil.copyfile(name, prefix_save + '_model_best.pth.tar')
+        shutil.copyfile(checkpoint_name, prefix_save + '_model_best.pth.tar')
 
 
 def gaussian_noise(x, batchsize, input_shape=(3, 224, 224), std=0.03):

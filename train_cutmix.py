@@ -63,10 +63,11 @@ def get_arguments():
     parser.add_argument('--max_val', type=float,  default=1, help='consistency')
     parser.add_argument('--consistency_rampup', type=float,  default=10000.0, help='consistency_rampup')
 
-    parser.add_argument("--num-steps", type=int, default=20500)
+    parser.add_argument("--num-steps", type=int, default=36001)
+
     # frequently change args
-    parser.add_argument('--log_dir', default='./log/gan_task2')
-    parser.add_argument('--save', default='./work/gan_task2/cutmix')
+    parser.add_argument('--log_dir', default='./log/methods_2')
+    parser.add_argument('--save', default='./work/methods_2/test')
 
     return parser.parse_args()
 
@@ -98,7 +99,7 @@ if os.path.exists(log_dir):
 writer = SummaryWriter(log_dir)
 
 # set title of the current process
-setproctitle.setproctitle('...')
+setproctitle.setproctitle('xuyang')
 
 # random
 cudnn.enabled = True
