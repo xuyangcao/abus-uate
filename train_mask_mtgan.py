@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import sys
 import tqdm
 import argparse
@@ -32,7 +32,7 @@ from tensorboardX import SummaryWriter
 
 from models.denseunet import DenseUnet
 from models.discriminator import s4GAN_discriminator
-from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
+from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize, GenerateMask
 from utils.utils import save_checkpoint, confusion
 from utils.loss import CrossEntropy2d, DiceLoss
 from utils.utils import one_hot as one_hot_tensor
@@ -44,17 +44,16 @@ def get_arguments():
     parser.add_argument('--seed', default=6, type=int) 
 
     parser.add_argument('--batch_size', type=int, default=10)
-    parser.add_argument('--ngpu', type=int, default=2)
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--ngpu', type=int, default=1)
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
     parser.add_argument("--num_classes", type=int, default=2)
 
-    parser.add_argument("--lr", type=float, default=3e-5)
-    parser.add_argument("--lr_D", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr_D", type=float, default=1e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--momentum", type=float, default=0.9)
 
     parser.add_argument("--lambda_adv", type=float, default=0.01)
     parser.add_argument("--lambda_fm", type=float, default=0.1)
@@ -65,10 +64,10 @@ def get_arguments():
     parser.add_argument('--max_val', type=float,  default=1, help='consistency')
     parser.add_argument('--consistency_rampup', type=float,  default=10000.0, help='consistency_rampup')
 
-    parser.add_argument("--num-steps", type=int, default=40000)
+    parser.add_argument("--num-steps", type=int, default=30500)
     # frequently change args
     parser.add_argument('--log_dir', default='./log/gan_task2')
-    parser.add_argument('--save', default='./work/gan_task2/mtvat_lrd1e-5')
+    parser.add_argument('--save', default='./work/gan_task2/test')
 
     return parser.parse_args()
 
@@ -100,7 +99,7 @@ if os.path.exists(log_dir):
 writer = SummaryWriter(log_dir)
 
 # set title of the current process
-setproctitle.setproctitle('xuyangcao')
+setproctitle.setproctitle('...')
 
 # random
 cudnn.enabled = True
@@ -248,6 +247,12 @@ def main():
         ToTensor(mode='train'), 
         Normalize(0.5, 0.5, mode='train')
         ])
+    train_mask_transform = transforms.Compose([
+        ElasticTransform('train'), 
+        GenerateMask('train'),
+        ToTensor(mode='train'), 
+        Normalize(0.5, 0.5, mode='train')
+        ])
     val_transform = transforms.Compose([
         ElasticTransform(mode='val'),
         ToTensor(mode='val'), 
@@ -262,7 +267,14 @@ def main():
                         )
     train_dataset_size = len(train_set_label)
     logging.info('train_dataset_size: {}'.format(train_dataset_size))
-    train_set_unlabel = ABUS_2D(base_dir=args.root_path,
+    train_set_unlabel_0 = ABUS_2D(base_dir=args.root_path,
+                        mode='train', 
+                        data_num_labeled=args.sample_k,
+                        use_labeled_data=False,
+                        use_unlabeled_data=True,
+                        transform=train_mask_transform
+                        )
+    train_set_unlabel_1 = ABUS_2D(base_dir=args.root_path,
                         mode='train', 
                         data_num_labeled=args.sample_k,
                         use_labeled_data=False,
@@ -286,7 +298,11 @@ def main():
                               batch_size=batch_size_label, 
                               shuffle=True, 
                               **kwargs)
-    trainloader_remain = DataLoader(train_set_unlabel, 
+    trainloader_remain_0 = DataLoader(train_set_unlabel_0, 
+                              batch_size=batch_size_unlabel, 
+                              shuffle=True, 
+                              **kwargs)
+    trainloader_remain_1 = DataLoader(train_set_unlabel_1, 
                               batch_size=batch_size_unlabel, 
                               shuffle=True, 
                               **kwargs)
@@ -295,6 +311,9 @@ def main():
                             shuffle=False,
                             **kwargs)
     trainloader_iter = enumerate(trainloader)
+    trainloader_remain_iter_0 = iter(trainloader_remain_0)
+    trainloader_remain_iter_1 = iter(trainloader_remain_1)
+
 
     #####################
     # optimizer & loss  #
@@ -330,21 +349,53 @@ def main():
         pred_l = F.softmax(pred_l, dim=1)
         loss_super = loss_fn['dice_loss'](labels_l, pred_l)
 
-        ## 1.2 loss adv
+        ## 1.2 unsuper loss
         try:
-            batch_remain = next(trainloader_remain_iter)
+            unsup_batch0 = next(trainloader_remain_iter_0)
         except:
-            trainloader_remain_iter = iter(trainloader_remain)
-            batch_remain = next(trainloader_remain_iter)
-        images_remain = batch_remain['image']
-        images_remain = Variable(images_remain).cuda()
-        pred_remain = model(images_remain)
-        pred_remain = F.softmax(pred_remain, dim=1)
+            trainloader_remain_iter_0 = iter(trainloader_remain_0)
+            unsup_batch0 = next(trainloader_remain_iter_0)
+        try:
+            unsup_batch1 = next(trainloader_remain_iter_1)
+        except:
+            trainloader_remain_iter_1 = iter(trainloader_remain_1)
+            unsup_batch1 = next(trainloader_remain_iter_1)
+
+        ux0, mix_mask = unsup_batch0['image'], unsup_batch0['mask']
+        ux1 = unsup_batch1['image']
+        ux0, ux1, mix_mask = ux0.cuda(), ux1.cuda(), mix_mask.cuda()
+        ux_mixed = ux0 * (1 - mix_mask) + ux1 * mix_mask
+
+        with torch.no_grad():
+            u0_tea = ema_model(ux0).detach()
+            u1_tea = ema_model(ux1).detach()
+        cons_tea = u0_tea * (1 - mix_mask) + u1_tea * mix_mask
+        cons_tea = F.softmax(cons_tea, dim=1)
+        cons_stu = model(ux_mixed)
+        cons_stu = F.softmax(cons_stu, dim=1)
+        loss_unsuper = F.mse_loss(cons_stu, cons_tea)
+
+        # show results
+        image_mixed = ux_mixed * 0.5 + 0.5
+        if i_iter % 50 == 0:
+            show_results(image_mixed, cons_tea, cons_stu, 
+                         label_gt='pseudo_labels', 
+                         label_pre='prediction', 
+                         label_fig='train_unlabeled_results',
+                         i_iter=i_iter 
+                         )
+
+        ## 1.3 loss adv
 
         images_l_norm = images_l * 0.5 + 0.5
+        pred_l = pred_l.detach()
         pred_l_cat = torch.cat((pred_l, images_l_norm[:, 0:1, ...]), dim=1)
         D_out_labeled, D_out_labeled_feature = model_D(pred_l_cat)
 
+        images_remain = ux0
+        pred_remain = model(images_remain)
+        pred_remain = F.softmax(pred_remain, dim=1)
+        pred_remain = pred_remain.detach()
         images_remain_norm = images_remain * 0.5 + 0.5
         pred_ul_cat = torch.cat((pred_remain, images_remain_norm[:, 0:1, ...]), dim=1)
         D_out_ul, D_out_ul_feature = model_D(pred_ul_cat) 
@@ -353,50 +404,14 @@ def main():
         label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
         loss_adv = F.mse_loss(D_out_all, label_)
 
-        # 1.3 unsuper seg loss
-        images_all = torch.cat((images_l, images_remain), dim=0)
-        pred_all = torch.cat((pred_l, pred_remain), dim=0)
-        with torch.no_grad():
-            ema_input = gaussian_noise(images_all)
-            ema_out = ema_model(ema_input)
-            ema_out = F.softmax(ema_out, dim=1)
-        loss_unsuper =  F.mse_loss(pred_all, ema_out)
-
-        #images_all_norm = images_all * 0.5 + 0.5
-        #emainput_D = torch.cat((ema_out, images_all_norm[:, 0:1, ...]), dim=1)
-        #D_emaout, _ = model_D(emainput_D)
-
-        #count, pred_sel, ema_out_sel, image_norm_sel = get_good_maps(D_emaout, pred_all, ema_out, images_all_norm)
-        #if count > 0 and i_iter > 1000:
-        #    loss_unsuper = F.mse_loss(pred_sel, ema_out_sel) #only use good results for ul
-        #else:
-        #    loss_unsuper = 0.0
-
-        # 1.2.1 show predictions of unlabeled data and selected data
-        images_all_norm = images_all * 0.5 + 0.5
-        if i_iter % 20 == 0:
-            show_results(images_all_norm, ema_out, pred_all, 
-                         label_gt='pseudo_labels', 
-                         label_pre='prediction', 
-                         label_fig='train_unlabeled_results',
-                         i_iter=i_iter 
-                         )
-            #if count:
-            #    show_results(image_norm_sel, ema_out_sel, pred_sel,
-            #                 label_gt='pseudo_labels',
-            #                 label_pre='prediction',
-            #                 label_fig='train_selsected_results',
-            #                 i_iter=i_iter)
-
         # 1.4 feature matching loss
         #loss_fm = torch.mean(torch.abs(torch.mean(D_out_labeled_feature, 0) - torch.mean(D_out_ul_feature, 0)))
 
         # 1.5 total G loss
-        w_ul = args.max_val * sigmoid_rampup(i_iter, args.consistency_rampup)
-        writer.add_scalar('train_Wul', w_ul, i_iter)
-        #loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper + args.lambda_fm * loss_fm
-        loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper
-
+        w = args.max_val * sigmoid_rampup(i_iter, args.consistency_rampup)
+        #loss_G = loss_super + args.lambda_adv * loss_adv + w * loss_unsuper
+        loss_G = loss_super + 0.0 * loss_adv + w * loss_unsuper
+        # back propagation and update ema_model
         optimizer.zero_grad()
         loss_G.backward()
         optimizer.step()
@@ -429,8 +444,8 @@ def main():
 
         # show losses and save model
         writer.add_scalar('train_loss_super', loss_super.item(), i_iter)
-        writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
-        writer.add_scalar('train_loss_unsuper', w_ul*loss_unsuper, i_iter)
+        #writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
+        writer.add_scalar('train_loss_unsuper', w*loss_unsuper, i_iter)
         #writer.add_scalar('train_loss_fm', loss_fm.item(), i_iter)
         writer.add_scalar('train_loss_G', loss_G.item(), i_iter)
         writer.add_scalar('train_loss_D', loss_D.item(), i_iter)

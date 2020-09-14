@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '2,3' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
 import sys
 import argparse 
 import shutil
@@ -39,7 +39,7 @@ def get_args():
     parser.add_argument('--root_path', default='../data/', type=str)
 
     parser.add_argument('--batchsize', type=int, default=10)
-    parser.add_argument('--ngpu', type=int, default=2)
+    parser.add_argument('--ngpu', type=int, default=1)
     parser.add_argument('--gpu_idx', default=0, type=int)
     parser.add_argument('--seed', default=6, type=int) 
 

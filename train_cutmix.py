@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import sys
 import tqdm
 import argparse
@@ -44,8 +44,8 @@ def get_arguments():
     parser.add_argument('--seed', default=6, type=int) 
 
     parser.add_argument('--batch_size', type=int, default=10)
-    parser.add_argument('--ngpu', type=int, default=2)
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--ngpu', type=int, default=1)
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
@@ -63,10 +63,10 @@ def get_arguments():
     parser.add_argument('--max_val', type=float,  default=1, help='consistency')
     parser.add_argument('--consistency_rampup', type=float,  default=10000.0, help='consistency_rampup')
 
-    parser.add_argument("--num-steps", type=int, default=40000)
+    parser.add_argument("--num-steps", type=int, default=20500)
     # frequently change args
     parser.add_argument('--log_dir', default='./log/gan_task2')
-    parser.add_argument('--save', default='./work/gan_task2/mtvat_lrd1e-5')
+    parser.add_argument('--save', default='./work/gan_task2/cutmix')
 
     return parser.parse_args()
 
