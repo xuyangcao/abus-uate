@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import sys
 import tqdm
 import argparse
@@ -63,11 +63,11 @@ def get_arguments():
     parser.add_argument('--max_val', type=float,  default=1, help='consistency')
     parser.add_argument('--consistency_rampup', type=float,  default=10000.0, help='consistency_rampup')
 
-    parser.add_argument("--num-steps", type=int, default=36001)
+    parser.add_argument("--num-steps", type=int, default=20001)
 
     # frequently change args
-    parser.add_argument('--log_dir', default='./log/methods_2')
-    parser.add_argument('--save', default='./work/methods_2/test')
+    parser.add_argument('--log_dir', default='./log/gan_task2')
+    parser.add_argument('--save', default='./work/gan_task2/test')
 
     return parser.parse_args()
 

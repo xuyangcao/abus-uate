@@ -1,21 +1,54 @@
-#python ./train_mask_mtgan_ous.py --save ./work/gan_task2/mtgan_cutmix_ours_100 --max_val 1 --sample_k 100
+# emt_vat 
+python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_100 --max_val 1 --sample_k 100
+
+#python ./train_lstm_te.py --save ./work/gan_task2/lstm_te_100_1 --max_val 1 --sample_k 100 
+#python ./train_lstm_te.py --save ./work/gan_task2/lstm_te_100 --max_val 1 --sample_k 100 
 
 
-#python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_1770_1gpu_1 --max_val 1 --sample_k 1770
+#python ./train_mt_AC.py --save ./work/gan_task2/mtac_100 --max_val 1 --sample_k 100
+#python ./train_tegan_ac.py --save ./work/gan_task2/tegan_ac_100_1gpu --max_val 1 --alpha_psudo 0.6 --sample_k 100 
+
+
+# semi with artificial images
+#python ./train_artifial.py --save ./work/gan_task2/artificial_labels_100 --max_val 1 --sample_k 100
+
+
+# tegan cutmix
+#python ./train_mask_tegan.py --save ./work/gan_task2/tegan_cutmix_100 --max_val 1 --sample_k 100
+
+
+# cutmix methods_2
 #python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_1770_1gpu --max_val 1 --sample_k 1770
 #python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_885_1gpu --max_val 1 --sample_k 885
 #python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_300_1gpu --max_val 1 --sample_k 300
 #python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_100_1gpu --max_val 1
-#python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_300 --max_val 1 --sample_k 300
-#python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_100 --max_val 1
+#python ./train_cutmix.py --save ./work/gan_task2/cutmix_mt_300_maxval5 --max_val 5 --sample_k 300
+#python ./train_cutmix.py --save ./work/methods_2/cutmix_mt_300 --max_val 1 --sample_k 300
+#python ./train_cutmix.py --save ./work/methods_2/cutmix_mt_100 --max_val 1
+
+# mean teacher methods_2
+#python ./train_mt.py --save ./work/methods_2/mean_teacher --max_val 1 --sample_k 100 
+
+# tegan_method
+#python ./train_tegan.py --save ./work/methods_2/tegan_885 --max_val 1 --sample_k 885 # reduce HD compread with te model
+
+# uate methods_2
+#python ./train.py --save ./work/methods_2/uate_100 --max_val 0.1 --train_method semisuper --is_uncertain --sample_k 100 
+
+# te methods 2
+#python ./train.py --save ./work/methods_2/te_1770 --max_val 1 --train_method semisuper --sample_k 1770 
+#python ./train.py --save ./work/methods_2/te_885 --max_val 1 --train_method semisuper --sample_k 885 
+#python ./train.py --save ./work/methods_2/te_300 --max_val 1 --train_method semisuper --sample_k 300 
 
 
-python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_300_1gpu_rmadvloss --max_val 1 --sample_k 300
+# mtgan cutmix
+#python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_300_1gpu_rmadvloss --max_val 1 --sample_k 300
 #python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_100_1gpu_rmadvloss --max_val 1 --sample_k 100
 #python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_100_1gpu --max_val 1 --sample_k 100
 #python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_100 --max_val 1 --sample_k 100
 
 
+#python ./train_tegan.py --save ./work/gan_task2/tegan_300_1gpu --max_val 1 --alpha_psudo 0.6 --sample_k 300 
 #python ./train_tegan.py --save ./work/gan_task2/tegan_100_hard --max_val 1 --alpha_psudo 0.6 --sample_k 100 --consis_method hard
 #python ./train_vatmt.py --save ./work/gan_task2/vatmt_100_singlegpu --max_val 1 --sample_k 100 
 #python ./train_tegan.py --save ./work/gan_task2/tegan_100_singlegpu --max_val 1 --alpha_psudo 0.6 --sample_k 100 
@@ -25,6 +58,8 @@ python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_300_1gpu_rmadv
 #python ./train_tegan.py --save ./work/gan_task2/tegan_300 --max_val 1 --alpha_psudo 0.6 --sample_k 300 
 #python ./train_tegan.py --save ./work/gan_task2/tegan_100 --max_val 1 --alpha_psudo 0.6 --sample_k 100 
 
+# mtgan method
+#python train_mtgan.py --save ./work/gan_task2/mtgan_100_1gpu --max_val 1
 #python train_mtgan.py --save ./work/gan_task2/mtgan_100 --max_val 1
 #python train_mtgan.py --save ./work/gan_task2/mtgan_cons1_st_th0.55 --consistency 1 --threshold_st 0.55
 #python train_mtgan.py --save ./work/gan_task2/mtgan_cons1_st --consistency 1 --threshold_st 0.5
@@ -36,6 +71,9 @@ python ./train_mask_mtgan.py --save ./work/gan_task2/mtgan_cutmix_300_1gpu_rmadv
 #python train_mtgan.py --save ./work/gan_task2/mtgan_lr3e-5_lrd1e-6_cons0.1 --consistency 0.1
 #python train_mtgan.py --save ./work/gan_task2/mtgan_lr3e-5_lrd1e-5_cons0.1_lfm --lr 0.00003 --lr_D 0.00001 --consistency 0.1
 #python train_mtgan.py --save ./work/gan_task2/mtgan_lr3e-5_lrd1e-5_cons0.1 --lr 0.00003 --lr_D 0.00001 --consistency 0.1
+
+
+#python train_s4GAN.py --save ./work/methods_2/s4gan_100
 #python train_s4GAN.py --save ./work/gan_task2/s4gan_baseline
 
 

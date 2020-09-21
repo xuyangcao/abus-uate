@@ -44,12 +44,12 @@ def get_args():
     parser.add_argument('--batchsize', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=1)
 
-    parser.add_argument('--n_epochs', type=int, default=60)
+    parser.add_argument('--n_epochs', type=int, default=100)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
     parser.add_argument("--lr_D", type=float, default=1e-4)
-    parser.add_argument('--weight_decay', '--wd', default=1e-4, type=float, metavar='W')
+    parser.add_argument('--weight_decay', '--wd', default=1e-6, type=float, metavar='W')
     parser.add_argument('--max_val', default=1., type=float) # maxmum of ramp-up function 
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
     parser.add_argument('--time', '-T', default=1, type=int) # T in uncertain
@@ -67,8 +67,8 @@ def get_args():
     # frequently change args
     parser.add_argument('--is_uncertain', default=False, action='store_true') 
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--log_dir', default='./log/methods_2')
-    parser.add_argument('--save', default='./work/methods_2/test')
+    parser.add_argument('--log_dir', default='./log/gan_task2')
+    parser.add_argument('--save', default='./work/gan_task2/test')
 
     args = parser.parse_args()
     return args
@@ -302,7 +302,13 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
         ''' 
         # read data
         data, target, psuedo_target, uncertain = sample['image'], sample['target'], sample['psuedo_target'], sample['uncertainty']
-        data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
+
+        data_norm = data * 0.5 + 0.5
+        data_aug = data_norm + torch.cat((psuedo_target[:, 0:1, ...], psuedo_target[:, 0:1, ...], psuedo_target[:, 0:1, ...]), dim=1)
+        data_aug = data_aug / 2.
+        data_aug  = (data_aug - 0.5) / 0.5
+        
+        #data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
         data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
         psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)
 
@@ -314,6 +320,8 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
         out = model(data_aug)
         out = F.softmax(out, dim=1)
         dice = DiceLoss.dice_coeficient(out.max(1)[1], target) 
+
+        
 
         # uncertainty
         with torch.no_grad():

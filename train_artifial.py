@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import sys
 import tqdm
 import argparse
@@ -32,7 +32,7 @@ from tensorboardX import SummaryWriter
 
 from models.denseunet import DenseUnet
 from models.discriminator import s4GAN_discriminator
-from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
+from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize, GenerateMask
 from utils.utils import save_checkpoint, confusion
 from utils.loss import CrossEntropy2d, DiceLoss
 from utils.utils import one_hot as one_hot_tensor
@@ -45,30 +45,24 @@ def get_arguments():
 
     parser.add_argument('--batch_size', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=1)
-    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 885, 1770, 4428)) 
+    parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428)) 
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
     parser.add_argument("--num_classes", type=int, default=2)
 
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--lr_D", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--momentum", type=float, default=0.9)
-
-    parser.add_argument("--lambda_adv", type=float, default=0.)
-    parser.add_argument("--lambda_fm", type=float, default=0.1)
-    parser.add_argument("--lambda_st", type=float, default=1.0)
-    parser.add_argument("--threshold_st", type=float, default=0.5)
 
     parser.add_argument('--ema_decay', type=float,  default=0.99, help='ema_decay')
     parser.add_argument('--max_val', type=float,  default=1, help='consistency')
     parser.add_argument('--consistency_rampup', type=float,  default=10000.0, help='consistency_rampup')
 
     parser.add_argument("--num-steps", type=int, default=20001)
+
     # frequently change args
     parser.add_argument('--log_dir', default='./log/gan_task2')
-    parser.add_argument('--save', default='./work/gan_task2/mtvat_lrd1e-5')
+    parser.add_argument('--save', default='./work/gan_task2/test')
 
     return parser.parse_args()
 
@@ -100,7 +94,7 @@ if os.path.exists(log_dir):
 writer = SummaryWriter(log_dir)
 
 # set title of the current process
-setproctitle.setproctitle('xuyangcao')
+setproctitle.setproctitle('xuyang')
 
 # random
 cudnn.enabled = True
@@ -112,7 +106,7 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 
 def get_current_consistency_weight(args, epoch):
-    return args.consistency * sigmoid_rampup(epoch, args.consistency_rampup)
+    return args.max_val * sigmoid_rampup(epoch, args.consistency_rampup)
 
 def update_ema_variables(model, ema_model, alpha, global_step):
     alpha = min(1 - 1 / (global_step + 1), alpha)
@@ -157,27 +151,6 @@ def one_hot(label):
     #handle ignore labels
     return torch.FloatTensor(one_hot)
 
-def get_good_maps(D_outs, pred, ema_out, image):
-    out = D_outs.cpu().detach().numpy().flatten()
-    count = sum(out > args.threshold_st)
-    if count:
-        logging.info('=== Above ST-Threshold : {} / {} ==='.format(count, args.batch_size*args.ngpu))
-        pred_sel = torch.Tensor(count, pred.size(1), pred.size(2), pred.size(3))
-        ema_out_sel = torch.Tensor(count, ema_out.size(1), ema_out.size(2), ema_out.size(3))
-        img_sel = torch.Tensor(count, image.size(1), image.size(2), image.size(3))
-
-        num_sel = 0 
-        for j in range(D_outs.size(0)):
-            if D_outs[j] > args.threshold_st:
-                pred_sel[num_sel] = pred[j]
-                ema_out_sel[num_sel] = ema_out[j]
-                img_sel[num_sel] = image[j]
-                num_sel += 1
-        return count, pred_sel.cuda(), ema_out_sel.cuda(), img_sel.cuda()
-
-    else:
-        return count, 0, 0, 0
-
 def gaussian_noise(x, mean=0, std=0.03):
     noise = torch.zeros(x.shape)
     noise.data.normal_(mean, std)
@@ -220,23 +193,16 @@ def main():
 
     model = create_model(args)
     ema_model = create_model(args, ema=True)
-    model_D = s4GAN_discriminator(in_channels=3, num_classes=2)
     if args.ngpu > 1:
         model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
         ema_model = nn.parallel.DataParallel(ema_model, list(range(args.ngpu)))
-        model_D = nn.parallel.DataParallel(model_D, list(range(args.ngpu)))
-
     n_params = sum([p.data.nelement() for p in model.parameters()])
-    logging.info('--- modelG parameters = {} ---'.format(n_params))
-    n_params = sum([p.data.nelement() for p in model_D.parameters()])
-    logging.info('--- modelD parameters = {} ---'.format(n_params))
+    logging.info('--- model parameters = {} ---'.format(n_params))
 
     model = model.cuda()
     ema_model = ema_model.cuda()
-    model_D = model_D.cuda()
     model.train()
     ema_model.train()
-    model_D.train()
 
     ################
     # prepare data #
@@ -245,6 +211,12 @@ def main():
 
     train_transform = transforms.Compose([
         ElasticTransform('train'), 
+        ToTensor(mode='train'), 
+        Normalize(0.5, 0.5, mode='train')
+        ])
+    train_mask_transform = transforms.Compose([
+        ElasticTransform('train'), 
+        GenerateMask('train'),
         ToTensor(mode='train'), 
         Normalize(0.5, 0.5, mode='train')
         ])
@@ -262,11 +234,18 @@ def main():
                         )
     train_dataset_size = len(train_set_label)
     logging.info('train_dataset_size: {}'.format(train_dataset_size))
-    train_set_unlabel = ABUS_2D(base_dir=args.root_path,
+    train_set_unlabel_0 = ABUS_2D(base_dir=args.root_path,
                         mode='train', 
                         data_num_labeled=args.sample_k,
                         use_labeled_data=False,
                         use_unlabeled_data=True,
+                        transform=train_mask_transform
+                        )
+    train_set_label_1 = ABUS_2D(base_dir=args.root_path,
+                        mode='train', 
+                        data_num_labeled=args.sample_k,
+                        use_labeled_data=True,
+                        use_unlabeled_data=False,
                         transform=train_transform
                         )
     val_set = ABUS_2D(base_dir=args.root_path,
@@ -286,7 +265,11 @@ def main():
                               batch_size=batch_size_label, 
                               shuffle=True, 
                               **kwargs)
-    trainloader_remain = DataLoader(train_set_unlabel, 
+    trainloader_remain_0 = DataLoader(train_set_unlabel_0, 
+                              batch_size=batch_size_unlabel, 
+                              shuffle=True, 
+                              **kwargs)
+    trainloader_remain_1 = DataLoader(train_set_label_1, 
                               batch_size=batch_size_unlabel, 
                               shuffle=True, 
                               **kwargs)
@@ -295,13 +278,15 @@ def main():
                             shuffle=False,
                             **kwargs)
     trainloader_iter = enumerate(trainloader)
+    trainloader_remain_iter_0 = iter(trainloader_remain_0)
+    trainloader_remain_iter_1 = iter(trainloader_remain_1)
+
 
     #####################
     # optimizer & loss  #
     #####################
     logging.info('--- configing optimizer & losses ---')
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    optimizer_D = optim.Adam(model_D.parameters(), lr=args.lr_D)
 
 
     #####################
@@ -312,13 +297,8 @@ def main():
     best_pre = 0
     for i_iter in range(args.num_steps):
         adjust_learning_rate(optimizer, i_iter)
-        adjust_learning_rate_D(optimizer_D, i_iter)
 
-        ## 1 train Segmentation Network, don't accumulate grads in D
-        for param in model_D.parameters():
-            param.requires_grad = False
-
-        ## 1.1 super loss 
+        ## super loss 
         try:
             _, batch = next(trainloader_iter)
         except:
@@ -330,113 +310,61 @@ def main():
         pred_l = F.softmax(pred_l, dim=1)
         loss_super = loss_fn['dice_loss'](labels_l, pred_l)
 
-        ## 1.2 loss adv
-        try:
-            batch_remain = next(trainloader_remain_iter)
-        except:
-            trainloader_remain_iter = iter(trainloader_remain)
-            batch_remain = next(trainloader_remain_iter)
-        images_remain = batch_remain['image']
-        images_remain = Variable(images_remain).cuda()
-        pred_remain = model(images_remain)
-        pred_remain = F.softmax(pred_remain, dim=1)
+        ## unsuper loss
+        while True:
+            try:
+                unsup_batch0 = next(trainloader_remain_iter_0)
+            except:
+                trainloader_remain_iter_0 = iter(trainloader_remain_0)
+                unsup_batch0 = next(trainloader_remain_iter_0)
+            try:
+                unsup_batch1 = next(trainloader_remain_iter_1)
+            except:
+                trainloader_remain_iter_1 = iter(trainloader_remain_1)
+                unsup_batch1 = next(trainloader_remain_iter_1)
 
-        images_l_norm = images_l * 0.5 + 0.5
-        pred_l_cat = torch.cat((pred_l, images_l_norm[:, 0:1, ...]), dim=1)
-        D_out_labeled, D_out_labeled_feature = model_D(pred_l_cat)
+            if unsup_batch0['image'].shape == unsup_batch1['image'].shape:
+                break
 
-        images_remain_norm = images_remain * 0.5 + 0.5
-        pred_ul_cat = torch.cat((pred_remain, images_remain_norm[:, 0:1, ...]), dim=1)
-        D_out_ul, D_out_ul_feature = model_D(pred_ul_cat) 
+        ux0 = unsup_batch0['image']
+        ux1, mix_mask = unsup_batch1['image'], unsup_batch1['target']
+        ux0, ux1, mix_mask = ux0.cuda(), ux1.cuda(), mix_mask.cuda()
+        ux_mixed = ux0 * (1 - mix_mask) + ux1 * mix_mask
 
-        D_out_all = torch.cat((D_out_labeled, D_out_ul), dim=0)
-        label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
-        loss_adv = F.mse_loss(D_out_all, label_)
-
-        # 1.3 unsuper seg loss
-        images_all = torch.cat((images_l, images_remain), dim=0)
-        pred_all = torch.cat((pred_l, pred_remain), dim=0)
         with torch.no_grad():
-            ema_input = gaussian_noise(images_all)
-            ema_out = ema_model(ema_input)
-            ema_out = F.softmax(ema_out, dim=1)
-        loss_unsuper =  F.mse_loss(pred_all, ema_out)
+            u0_tea = ema_model(ux0).detach()
+        cons_tea = u0_tea * (1 - mix_mask) + mix_mask
+        cons_tea = F.softmax(cons_tea, dim=1)
+        cons_stu = model(ux_mixed)
+        cons_stu = F.softmax(cons_stu, dim=1)
+        loss_unsuper = F.mse_loss(cons_stu, cons_tea)
 
-        #images_all_norm = images_all * 0.5 + 0.5
-        #emainput_D = torch.cat((ema_out, images_all_norm[:, 0:1, ...]), dim=1)
-        #D_emaout, _ = model_D(emainput_D)
-
-        #count, pred_sel, ema_out_sel, image_norm_sel = get_good_maps(D_emaout, pred_all, ema_out, images_all_norm)
-        #if count > 0 and i_iter > 1000:
-        #    loss_unsuper = F.mse_loss(pred_sel, ema_out_sel) #only use good results for ul
-        #else:
-        #    loss_unsuper = 0.0
-
-        # 1.2.1 show predictions of unlabeled data and selected data
-        images_all_norm = images_all * 0.5 + 0.5
-        if i_iter % 20 == 0:
-            show_results(images_all_norm, ema_out, pred_all, 
+        # show results
+        image_mixed = ux_mixed * 0.5 + 0.5
+        if i_iter % 50 == 0:
+            show_results(image_mixed, cons_tea, cons_stu, 
                          label_gt='pseudo_labels', 
                          label_pre='prediction', 
                          label_fig='train_unlabeled_results',
                          i_iter=i_iter 
                          )
-            #if count:
-            #    show_results(image_norm_sel, ema_out_sel, pred_sel,
-            #                 label_gt='pseudo_labels',
-            #                 label_pre='prediction',
-            #                 label_fig='train_selsected_results',
-            #                 i_iter=i_iter)
-
-        # 1.4 feature matching loss
-        #loss_fm = torch.mean(torch.abs(torch.mean(D_out_labeled_feature, 0) - torch.mean(D_out_ul_feature, 0)))
-
-        # 1.5 total G loss
-        w_ul = args.max_val * sigmoid_rampup(i_iter, args.consistency_rampup)
-        writer.add_scalar('train_Wul', w_ul, i_iter)
-        #loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper + args.lambda_fm * loss_fm
-        loss_G = loss_super + args.lambda_adv * loss_adv + w_ul * loss_unsuper
-
+        
+        # total loss
+        w = args.max_val * sigmoid_rampup(i_iter, args.consistency_rampup)
+        loss_G = loss_super + w * loss_unsuper
+        # back propagation and update ema_model
         optimizer.zero_grad()
         loss_G.backward()
         optimizer.step()
         update_ema_variables(model, ema_model, args.ema_decay, i_iter)
 
-        # 2 train D
-        for param in model_D.parameters():
-            param.requires_grad = True
-
-        # 2.1 train with gt
-        labels_gt = labels_l.squeeze(axis=1) 
-        gt_onehot = Variable(one_hot(labels_gt)).cuda()
-        gt_cat = torch.cat((gt_onehot, images_l_norm[:, 0:1, ...]), dim=1)
-        D_out_gt, _ = model_D(gt_cat)
-        print('Dout_real: ', D_out_gt.detach().cpu().numpy().flatten())
-        y_real_ = Variable(torch.ones(D_out_gt.size(0), 1).cuda()) 
-        loss_D_real = criterion(D_out_gt, y_real_)
-        
-        # 2.2 train with pred
-        pred_all_cat = torch.cat((pred_l_cat, pred_ul_cat), dim=0).detach()
-        D_out_all_, _ = model_D(pred_all_cat) 
-        print('Dout_fake: ', D_out_all_.detach().cpu().numpy().flatten())
-        y_fake_ = Variable(torch.zeros(pred_all_cat.size(0), 1).cuda())
-        loss_D_fake = criterion(D_out_all_, y_fake_) 
-
-        loss_D = (loss_D_fake + loss_D_real) / 2.0
-        optimizer_D.zero_grad()
-        loss_D.backward()
-        optimizer_D.step()
-
         # show losses and save model
         writer.add_scalar('train_loss_super', loss_super.item(), i_iter)
-        writer.add_scalar('train_loss_adv', loss_adv.item(), i_iter)
-        writer.add_scalar('train_loss_unsuper', w_ul*loss_unsuper, i_iter)
-        #writer.add_scalar('train_loss_fm', loss_fm.item(), i_iter)
+        writer.add_scalar('train_loss_unsuper', w*loss_unsuper, i_iter)
         writer.add_scalar('train_loss_G', loss_G.item(), i_iter)
-        writer.add_scalar('train_loss_D', loss_D.item(), i_iter)
 
         logging.info('=== iter: {} ==='.format(i_iter))
-        if (i_iter) % 2000 == 0:
+        if (i_iter+1) % 2000 == 0:
             dice = val(i_iter, ema_model, val_loader)
             # save best checkpoint
             is_best = False

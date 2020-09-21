@@ -29,7 +29,7 @@ from tensorboardX import SummaryWriter
 from models.denseunet import DenseUnet
 from models.resunet import UNet
 from models.discriminator import s4GAN_discriminator
-from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
+from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize, GenerateMask 
 from utils.loss import DiceLoss, MaskDiceLoss, MaskMSELoss
 from utils.ramps import sigmoid_rampup 
 from utils.utils import save_checkpoint, gaussian_noise, confusion, one_hot
@@ -44,7 +44,7 @@ def get_args():
     parser.add_argument('--batchsize', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=1)
 
-    parser.add_argument('--n_epochs', type=int, default=60)
+    parser.add_argument('--n_epochs', type=int, default=100)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
@@ -60,15 +60,15 @@ def get_args():
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
     parser.add_argument('--drop_rate', default=0.3, type=float) # dropout rate 
-    
+ 
     # gan
     parser.add_argument("--lambda_adv", type=float, default=0.01)
 
     # frequently change args
     parser.add_argument('--is_uncertain', default=False, action='store_true') 
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--log_dir', default='./log/methods_2')
-    parser.add_argument('--save', default='./work/methods_2/test')
+    parser.add_argument('--log_dir', default='./log/gan_task2')
+    parser.add_argument('--save', default='./work/gan_task2/test')
 
     args = parser.parse_args()
     return args
@@ -147,6 +147,7 @@ logging.info('--- loading dataset ---')
 
 train_transform = transforms.Compose([
     ElasticTransform('train'), 
+    GenerateMask('train'),
     ToTensor(mode='train'), 
     Normalize(0.5, 0.5, mode='train')
     ])
@@ -302,6 +303,12 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
         ''' 
         # read data
         data, target, psuedo_target, uncertain = sample['image'], sample['target'], sample['psuedo_target'], sample['uncertainty']
+
+
+
+
+
+
         data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
         data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
         psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)

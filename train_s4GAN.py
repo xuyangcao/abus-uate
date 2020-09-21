@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import sys
 import tqdm
 import argparse
@@ -79,14 +79,14 @@ def get_arguments():
     parser.add_argument("--threshold_st", type=float, default=0.5,
                         help="threshold_st for the self-training threshold.")
 
-    parser.add_argument("--num-steps", type=int, default=40000,
+    parser.add_argument("--num-steps", type=int, default=30001,
                         help="Number of iterations.")
     parser.add_argument("--save-pred-every", type=int, default=5000,
                         help="Save summaries and checkpoint every often.")
 
     # frequently change args
-    parser.add_argument('--log_dir', default='./log/gan_task2')
-    parser.add_argument('--save', default='./work/gan_task2/s4gan_thst_0.4')
+    parser.add_argument('--log_dir', default='./log/methods_2')
+    parser.add_argument('--save', default='./work/methods_2/s4gan_thst_0.4')
 
     return parser.parse_args()
 

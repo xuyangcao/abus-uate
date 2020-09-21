@@ -91,6 +91,7 @@ def save_checkpoint(state, is_best, path, arch, filename='checkpoint.pth.tar'):
 def gaussian_noise(x, batchsize, input_shape=(3, 224, 224), std=0.03):
     noise = torch.zeros(x.shape)
     noise.data.normal_(0, std)
+    noise = noise.to(x.device)
     return x + noise
 
 def datestr():

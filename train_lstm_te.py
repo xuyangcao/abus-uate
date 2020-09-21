@@ -28,6 +28,7 @@ from tensorboardX import SummaryWriter
 
 from models.denseunet import DenseUnet
 from models.resunet import UNet
+from models.lstm import LSTM
 from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
 from utils.loss import DiceLoss, MaskDiceLoss, MaskMSELoss
 from utils.ramps import sigmoid_rampup 
@@ -43,7 +44,7 @@ def get_args():
     parser.add_argument('--gpu_idx', default=0, type=int)
     parser.add_argument('--seed', default=6, type=int) 
 
-    parser.add_argument('--n_epochs', type=int, default=60)
+    parser.add_argument('--n_epochs', type=int, default=80)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float) # learning rete
@@ -53,46 +54,43 @@ def get_args():
     parser.add_argument('--max_epochs', default=40, type=float) # max epoch of weight schedualer 
     parser.add_argument('--time', '-T', default=2, type=int) # T in uncertain
 
-    parser.add_argument('--train_method', default='semisuper', choices=('super', 'semisuper'))
     parser.add_argument('--alpha_psudo', default=0.6, type=float) #alpha for psudo label update
-    parser.add_argument('--uncertain_map', default='epis', type=str, choices=('epis', 'alec', 'mix', '')) # max epoch of weight schedualer 
-
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet')) #architecture
 
     # frequently change args
-    parser.add_argument('--is_uncertain', default=False, action='store_true') 
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--log_dir', default='./log/methods_2')
-    parser.add_argument('--save', default='./work/methods_2/test')
+
+    parser.add_argument('--log_dir', default='./log/gan_task2')
+    parser.add_argument('--save', default='./work/gan_task2/test')
 
     args = parser.parse_args()
 
     return args
 
+#############
+# init args #
+#############
+args = get_args()
+
+# creat save path
+if os.path.exists(args.save):
+    shutil.rmtree(args.save)
+os.makedirs(args.save, exist_ok=True)
+
+# logger
+logging.basicConfig(filename=args.save+"/log.txt", level=logging.INFO,
+                    format='[%(asctime)s.%(msecs)03d] %(message)s', datefmt='%H:%M:%S')
+logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+logging.info(str(args))
+logging.info('--- init parameters ---')
+
+# writer
+idx = args.save.rfind('/')
+log_dir = args.log_dir + args.save[idx:]
+if os.path.exists(log_dir):
+    shutil.rmtree(log_dir)
+writer = SummaryWriter(log_dir)
 def main():
-    #############
-    # init args #
-    #############
-    args = get_args()
-
-    # creat save path
-    if os.path.exists(args.save):
-        shutil.rmtree(args.save)
-    os.makedirs(args.save, exist_ok=True)
-
-    # logger
-    logging.basicConfig(filename=args.save+"/log.txt", level=logging.INFO,
-                        format='[%(asctime)s.%(msecs)03d] %(message)s', datefmt='%H:%M:%S')
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-    logging.info(str(args))
-    logging.info('--- init parameters ---')
-
-    # writer
-    idx = args.save.rfind('/')
-    log_dir = args.log_dir + args.save[idx:]
-    if os.path.exists(log_dir):
-        shutil.rmtree(log_dir)
-    writer = SummaryWriter(log_dir)
 
     # set title of the current process
     setproctitle.setproctitle('...')
@@ -121,16 +119,17 @@ def main():
         model = UNet(3, 2, relu=False)
     else:
         raise(RuntimeError('error in building network!'))
-        
+    model_lstm = LSTM(in_channel=4, ngf=32)
+
     if args.ngpu > 1:
         model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
+        model_lstm = nn.parallel.DataParallel(model_lstm, list(range(args.ngpu)))
 
     n_params = sum([p.data.nelement() for p in model.parameters()])
     logging.info('--- total parameters = {} ---'.format(n_params))
 
     model = model.cuda()
-    #x = torch.zeros((1, 3, 256, 256)).cuda()
-    #writer.add_graph(model, x)
+    model_lstm = model_lstm.cuda()
 
 
     ################
@@ -193,6 +192,7 @@ def main():
     z = torch.zeros(nTrain, 2, width, height).float()
     outputs = torch.zeros(nTrain, 2, width, height).float()
     uncertain_map = torch.zeros(nTrain, 2, width, height).float()  
+
     for epoch in range(args.start_epoch, args.n_epochs + 1):
         # learning rate
         if epoch % 30 == 0:
@@ -212,11 +212,8 @@ def main():
                                   return_index=True, 
                                   worker_init_fn=worker_init_fn, 
                                   **kwargs) # set return_index==true 
-        oukputs, losses, sup_losses, unsup_losses, w, uncertain = train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=args.time)
-        if args.is_uncertain:
-            alpha = (1 - uncertain) * args.alpha_psudo + uncertain
-        else:
-            alpha = args.alpha_psudo
+        oukputs, losses, sup_losses, unsup_losses, w, uncertain_map = train(args, epoch, model, model_lstm, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=args.time)
+        alpha = args.alpha_psudo
         Z = alpha * Z + (1-alpha)*outputs
         z = Z * (1. / (1.-0.6**(epoch+1)))
 
@@ -226,25 +223,24 @@ def main():
         writer.add_scalar('w/epoch', w.item(), epoch)
         writer.add_scalar('lr/epoch', lr, epoch)
 
-        if epoch == 1 or epoch % 3 == 0:
+        if epoch == 1 or epoch % 5 == 0:
             dice = val(args, epoch, model, val_loader, optimizer, loss_fn, writer)
             # save checkpoint
             is_best = False
             if dice > best_pre:
                 is_best = True
                 best_pre = dice
-            if is_best or epoch % 3 == 0:
-                save_checkpoint({'epoch': epoch,
-                                 'state_dict': model.state_dict(),
-                                 'best_pre': best_pre},
-                                  is_best, 
-                                  args.save, 
-                                  args.arch)
+            save_checkpoint({'epoch': epoch,
+                             'state_dict': model.state_dict(),
+                             'best_pre': best_pre},
+                              is_best, 
+                              args.save, 
+                              args.arch)
 
     writer.close()
 
 
-def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=2, debug=False):
+def train(args, epoch, model, model_lstm, train_loader, optimizer, loss_fn, writer, Z, z, uncertain_map, outputs, T=2, debug=False):
     model.train()
     width = 128 
     height = 512 
@@ -260,70 +256,33 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
         indices = sample_indices[1]
 
         # read data
+        # uncertainty here is used as cell state
         data, target, psuedo_target, uncertain = sample['image'], sample['target'], sample['psuedo_target'], sample['uncertainty']
         data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
         data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
-        psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)
+        psuedo_target = Variable(psuedo_target.cuda())
+        uncertain = Variable(uncertain.cuda())
         
-        if args.train_method == 'super':
-            cond = target[:, 0, 0, 0] >= 0 # first element of all samples in a batch 
-            nnz = torch.nonzero(cond) # get how many labeled samples in a batch 
-            nbsup = len(nnz)
-            if nbsup == 0:
-                continue
-
         # feed to model 
         out = model(data_aug)
         out = F.softmax(out, dim=1)
-        dice = DiceLoss.dice_coeficient(out.max(1)[1], target) 
-        precision, recall = confusion(out.max(1)[1], target) #target = target.view((out.shape[0], target.numel()//out.shape[0]))
 
-        with torch.no_grad():
-            out_hat_shape = (T+1,) + out.shape
-            temp_out_shape = (1, ) + out.shape
-            out_hat = Variable(torch.zeros(out_hat_shape).float().cuda(), requires_grad=False)
-            out_hat[0] = out.view(temp_out_shape)
-            for t in range(T):
-                data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
-                data_aug = Variable(data_aug.cuda())
-                out_hat[t+1] = F.softmax(model(data_aug), dim=1).view(temp_out_shape)
-            aleatoric = torch.mean(out_hat*(1-out_hat), 0)
-            epistemic = torch.mean(out_hat**2, 0) - torch.mean(out_hat, 0)**2
-            epistemic = (epistemic - epistemic.min()) / (epistemic.max() - epistemic.min())
-
-            out_u = out_hat[0]
+        cell_t, hide_t = model_lstm(out, psuedo_target, psuedo_target) # x_t, cell_t_1, hide_t_1
+        hide_t = F.softmax(hide_t, dim=1)
+        cell_t = F.softmax(cell_t, dim=1)
 
         for i, j in enumerate(indices):
-            outputs[j] = out_u[i].data.clone().cpu()
-        if args.uncertain_map == 'epis':
-            uncertain_temp = epistemic
-        elif args.uncertain_map == 'alec':
-            uncertain_temp = aleatoric
-        else:
-            uncertain_temp = torch.max(epistemic, aleatoric) 
+            outputs[j] = cell_t[i].data.clone().cpu()
         for i, j in enumerate(indices):
-            uncertain_map[j] = uncertain_temp[i]
+            uncertain_map[j] = cell_t[i]
             
         # loss
         w = args.max_val * sigmoid_rampup(epoch, args.max_epochs)
         w = Variable(torch.FloatTensor([w]).cuda(), requires_grad=False)
 
-        zcomp = psuedo_target
         sup_loss, n_sup = loss_fn['mask_dice_loss'](out, target)
-
-        #threshold = (0.15 + 0.85*sigmoid_rampup(epoch, args.n_epochs))
-        threshold = 0.15
-        
-        mask = uncertain_temp < threshold
-        mask = mask.float()
-        if args.is_uncertain:
-            unsup_loss = loss_fn['mask_mse_loss'](out, zcomp, uncertain_temp, th=threshold)
-        else:
-            unsup_loss = F.mse_loss(out, zcomp)
-        if args.train_method == 'super':
-            loss = sup_loss
-        else: 
-            loss = sup_loss + w * unsup_loss
+        unsup_loss = F.mse_loss(out, cell_t)
+        loss = sup_loss + w * unsup_loss
 
         # back propagation
         optimizer.zero_grad()
@@ -336,132 +295,33 @@ def train(args, epoch, model, train_loader, optimizer, loss_fn, writer, Z, z, un
         logging.info('Train Epoch: {:.2f} [{}/{} ({:.0f}%)]\tLoss: {:.8f}'.format(
             partialEpoch, nProcessed, nTrain, 100. * batch_idx / len(train_loader),
             loss.item()))
-        writer.add_scalar('uncertain/epis_mean', epistemic.mean(), partialEpoch)
-        writer.add_scalar('uncertain/mask_per', torch.sum(mask) / mask.numel(), partialEpoch)
-        writer.add_scalar('uncertain/threshold', threshold, partialEpoch)
 
         # show images on tensorboard
-        with torch.no_grad():
-            index = torch.ones(1).long().cuda()
-            index0 = torch.zeros(1).long().cuda()
-            padding = 10
-            if batch_idx % 10 == 0:
-                # 1. show gt and prediction
-                data = (data * 0.5 + 0.5)
-                img = make_grid(data, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) * 255
-                img = img.astype(np.uint8)
-                img_old = img.copy()
+        if batch_idx % 10 == 0:
+            images_all_norm = data * 0.5 + 0.5
+            show_results(images_all_norm, out, hide_t, 
+                         label_gt='pseudo_labels', 
+                         label_pre='prediction', 
+                         label_fig='train_unlabeled_results',
+                         i_iter=epoch 
+                         )
+            show_prediction(out,
+                            label_pred='out',
+                            label_fig='train_out',
+                            i_iter=epoch)
+            show_prediction(hide_t,
+                            label_pred='hide_t',
+                            label_fig='train_hide_t',
+                            i_iter=epoch)
+            show_prediction(uncertain,
+                            label_pred='cell_t',
+                            label_fig='train_cell_t',
+                            i_iter=epoch)
+            show_prediction(psuedo_target,
+                            label_pred='pseudo_label',
+                            label_fig='train_pseudo_label',
+                            i_iter=epoch)
 
-                target[target < 0] = 0.
-                if debug and torch.sum(target) != 0:
-                    save_images = True
-                gt = make_grid(target, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                _, contours, _ = cv2.findContours(gt.astype(np.uint8).copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-                cv2.drawContours(img, contours, -1, (0, 255, 0), 2)
-
-                pre = torch.max(out, dim=1, keepdim=True)[1]
-                pre = pre.float()
-                pre = make_grid(pre, nrow=5, padding=padding).cpu().numpy().transpose(1, 2, 0)[:, :, 0]
-                pre_img = label2rgb(pre, img_old, bg_label=0)
-
-                epis = torch.index_select(epistemic, 1, index0)
-                #alea = torch.index_select(aleatoric, 1, index)
-                epis = make_grid(epis, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                
-                fig = plt.figure()
-                ax = fig.add_subplot(311)
-                ax.imshow(img, 'gray')
-                ax.set_title('tarin gt')
-                ax = fig.add_subplot(312)
-                ax.imshow(pre_img, 'gray')
-                ax.set_title('tarin pre')
-                ax = fig.add_subplot(313)
-                ax.imshow(epis, 'jet')
-                ax.set_title('train uncertainty')
-                fig.tight_layout() 
-                writer.add_figure('train_ori_image', fig, epoch)
-                fig.clear()
-                #if save_images:
-                #    filename = 'epoch_{}_batchIdx_{}_ori.png'.format(epoch, batch_idx)
-                #    imsave(os.path.join(args.save, filename), img)
-                #    filename = 'epoch_{}_batchIdx_{}_pre.png'.format(epoch, batch_idx)
-                #    imsave(os.path.join(args.save, filename), pre_img)
-
-                # show uncertainty 
-                #print('epistemic.shape', epistemic.shape)
-                #epis = torch.index_select(epistemic, 1, index0)
-                #alea = torch.index_select(aleatoric, 1, index)
-                #epis = make_grid(epis, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                #alea = make_grid(alea, nrow=5, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                #fig = plt.figure()
-                #ax = fig.add_subplot(211)
-                #map_ = ax.imshow(epis, 'jet')
-                ##plt.colorbar(map_)
-                #ax.set_title('train epistemic uncertainty')
-                #ax = fig.add_subplot(212)
-                #map_ = ax.imshow(alea, 'jet')
-                ##plt.colorbar(map_)
-                #ax.set_title('train aleatoric uncertainty')
-                #fig.tight_layout()
-                #writer.add_figure('train_uncertainty', fig, epoch)
-                #fig.clear()
-
-                #if save_images:
-                #    filename = 'epoch_{}_batchIdx_{}_epis.png'.format(epoch, batch_idx)
-                #    epis *= 255
-                #    epis = epis.astype(np.uint8)
-                #    epis_color = cv2.applyColorMap(epis, cv2.COLORMAP_HOT)
-                #    cv2.imwrite(os.path.join(args.save, filename), epis_color)
-
-                # show mask 
-                #mask = torch.index_select(mask, 1, index0)
-                #mask = make_grid(mask, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                #fig = plt.figure()
-                #ax = fig.add_subplot(211)
-                #map_ = ax.imshow(epis, 'jet')
-                ##plt.colorbar(map_)
-                #ax.set_title('train epistemic uncertainty')
-                #ax = fig.add_subplot(212)
-                #ax.imshow(mask, 'gray')
-                #ax.set_title('train mask')
-                #fig.tight_layout()
-                #writer.add_figure('mask', fig, epoch)
-                #fig.clear()
-
-                # show pseudo label
-                zcomp_ = torch.index_select(zcomp, 1, index)
-                zcomp_ = make_grid(zcomp_, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                out_ = torch.index_select(out, 1, index)
-                out_ = make_grid(out_, padding=padding, nrow=5).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
-                fig = plt.figure()
-                ax = fig.add_subplot(311)
-                ax.imshow(out_, 'jet', vmin=0.0, vmax=1.0)
-                ax.set_title('train current probability')
-                ax = fig.add_subplot(312)
-                ax.imshow(epis, 'jet')
-                ax.set_title('train epistemic uncertainty')
-                ax = fig.add_subplot(313)
-                ax.imshow(zcomp_, 'jet', vmin=0.0, vmax=1.0)
-                ax.set_title('train_pseudo_label')
-                fig.tight_layout()
-                writer.add_figure('train_pseudo_label', fig, epoch)
-                fig.clear()
-
-                # save pseudo labels for visualization
-                #if save_images:
-                #    filename = 'epoch_{}_batchIdx_{}_hot_pre.png'.format(epoch, batch_idx)
-                #    out_ *= 255
-                #    out_ = out_.astype(np.uint8)
-                #    out_color = cv2.applyColorMap(out_, cv2.COLORMAP_HOT)
-                #    cv2.imwrite(os.path.join(args.save, filename), out_color)
-                #    filename = 'epoch_{}_batchIdx_{}_pseudo_label.png'.format(epoch, batch_idx)
-                #    zcomp_ *= 255
-                #    zcomp_ = zcomp_.astype(np.uint8)
-                #    zcomp_color = cv2.applyColorMap(zcomp_, cv2.COLORMAP_HOT)
-                #    cv2.imwrite(os.path.join(args.save, filename), zcomp_color)
-
-                #save_images = False
 
         loss_list.append(loss.item())
         sup_loss_list.append(n_sup*sup_loss.item())
@@ -523,6 +383,52 @@ def val(args, epoch, model, val_loader, optimizer, loss_fn, writer):
         writer.add_scalar('val_precisin/epoch', np.mean(mean_precision), epoch)
         writer.add_scalar('val_recall/epoch', np.mean(mean_recall), epoch)
         return np.mean(mean_dice)
+
+def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
+    with torch.no_grad():
+        padding = 10
+        nrow = 4
+
+        img = make_grid(images, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
+
+        gt = torch.max(gt.cpu(), dim=1, keepdim=True)[1]
+        gt = gt.float()
+        gt = make_grid(gt, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+        gt_img = label2rgb(gt, img, bg_label=0)
+
+        pre = torch.max(pred.cpu(), dim=1, keepdim=True)[1]
+        pre = pre.float()
+        pre = make_grid(pre, nrow=nrow, padding=padding).numpy().transpose(1, 2, 0)[:, :, 0]
+        pre_img = label2rgb(pre, img, bg_label=0)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(211)
+        ax.imshow(gt_img)
+        ax.set_title(label_gt)
+        ax = fig.add_subplot(212)
+        ax.imshow(pre_img)
+        ax.set_title(label_pre)
+        fig.tight_layout() 
+        writer.add_figure(label_fig, fig, i_iter)
+        fig.clear()
+
+def show_prediction(pred, label_pred, label_fig, i_iter):
+    with torch.no_grad():
+        padding = 10
+        nrow = 4
+
+        pre = torch.max(pred.cpu(), dim=1, keepdim=True)[1]
+        pre = pre.float()
+        pre = make_grid(pre, nrow=nrow, padding=padding).numpy().transpose(1, 2, 0)[:, :, 0]
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.imshow(pre, 'jet')
+        ax.set_title(label_pred)
+        fig.tight_layout()
+        writer.add_figure(label_fig, fig, i_iter)
+        fig.clear()
+
 
 if __name__ == '__main__':
     main()

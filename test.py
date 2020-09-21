@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
 import tqdm
 import shutil 
 import argparse
@@ -62,8 +62,6 @@ def main():
     model = model.cuda()
     #model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
 
-
-    # --- resume trained weights ---
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))

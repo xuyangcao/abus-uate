@@ -24,7 +24,7 @@ def _l2_normalize(d):
 
 class VATPerturbation(nn.Module):
 
-    def __init__(self, xi=10.0, eps=1.0, ip=1):
+    def __init__(self, xi=5.0, eps=1.0, ip=1):
         """VAT Perturbation
         :param xi: hyperparameter of VAT (default: 10.0)
         :param eps: hyperparameter of VAT (default: 1.0)
