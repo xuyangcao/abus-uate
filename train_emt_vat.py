@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
 import sys
 import argparse 
 import shutil
@@ -45,7 +45,7 @@ def get_args():
     parser.add_argument('--batchsize', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=1)
 
-    parser.add_argument('--n_epochs', type=int, default=100)
+    parser.add_argument('--n_epochs', type=int, default=80)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float)
@@ -58,6 +58,7 @@ def get_args():
 
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
+    parser.add_argument('--mix', action='store_true', default=False)
 
     # frequently change args
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
@@ -227,7 +228,7 @@ def main():
 
         # val
         if epoch == 1 or epoch % 5 == 0:
-            dice = val(epoch)
+            dice, _ = val(epoch)
             # save checkpoint
             is_best = False
             if dice > best_pre:
@@ -241,6 +242,12 @@ def main():
                                   args.save, 
                                   args.arch)
 
+                save_checkpoint({'epoch': epoch,
+                                 'state_dict': ema_model.state_dict(),
+                                 'best_pre': best_pre},
+                                  is_best, 
+                                  args.save, 
+                                  args.arch+'_tea')
         # tensorboard
         writer.add_scalar('train_loss_super', np.sum(sup_losses)/args.sample_k, epoch)
         writer.add_scalar('train_loss_unsuper', np.mean(unsup_losses)*w, epoch)
@@ -291,7 +298,13 @@ def train(epoch, train_loader, Z, z, outputs):
         # super loss
         sup_loss, n_sup = loss_fn['mask_dice_loss'](out, target)
         # unsuper loss
-        unsup_loss = F.mse_loss(out, psuedo_target)
+        if args.mix:
+            if epoch < 10:
+                unsup_loss = F.mse_loss(out, ema_out)
+            else:
+                unsup_loss = F.mse_loss(out, psuedo_target)
+        else:
+            unsup_loss = F.mse_loss(out, psuedo_target)
         # total loss
         w = args.max_val * sigmoid_rampup(epoch, args.max_epochs)
         loss = sup_loss + w * unsup_loss
@@ -311,6 +324,7 @@ def train(epoch, train_loader, Z, z, outputs):
                          label_fig='train_unlabeled_results',
                          i_iter=epoch 
                          )
+            show_predictions(data, out, ema_out, psuedo_target, epoch)
         # show results on tensorboard 
         nProcessed += len(data)
         partialEpoch = epoch + batch_idx / len(train_loader)
@@ -321,6 +335,11 @@ def train(epoch, train_loader, Z, z, outputs):
         loss_list.append(loss.item())
         sup_loss_list.append(n_sup*sup_loss.item())
         unsup_loss_list.append(unsup_loss.item())
+
+        dis_pre2emapre = torch.norm((out - ema_out))
+        dis_pre2pseudopre = torch.norm((out - psuedo_target))
+        writer.add_scalar('train_dis_pre2ema', dis_pre2emapre, iter_num)
+        writer.add_scalar('train_dis_pre2pseu', dis_pre2pseudopre, iter_num)
         
     return outputs, loss_list, sup_loss_list, unsup_loss_list, w
 
@@ -330,6 +349,7 @@ def val(epoch):
     mean_dice = []
     mean_precision = []
     mean_recall = []
+    mean_loss = []
 
     with torch.no_grad():
         for sample in tqdm.tqdm(val_loader):
@@ -340,12 +360,14 @@ def val(epoch):
 
             out = model(data)
             out = F.softmax(out, dim=1)
+            loss, _ = loss_fn['mask_dice_loss'](out, target)
             dice = DiceLoss.dice_coeficient(out.max(1)[1], target)
             precision, recall = confusion(out.max(1)[1], target)
 
             mean_precision.append(precision.item())
             mean_recall.append(recall.item())
             mean_dice.append(dice.item())
+            mean_loss.append(loss.item())
 
         # show the last sample
         # 1. show gt and prediction
@@ -373,7 +395,43 @@ def val(epoch):
         writer.add_scalar('val_dice/epoch', np.mean(mean_dice), epoch)
         writer.add_scalar('val_precisin/epoch', np.mean(mean_precision), epoch)
         writer.add_scalar('val_recall/epoch', np.mean(mean_recall), epoch)
-        return np.mean(mean_dice)
+        writer.add_scalar('val_loss/epoch', np.mean(mean_loss), epoch)
+        return np.mean(mean_dice), np.mean(mean_loss)
+
+def show_predictions(data, pre, ema_out, psuedo_target, epoch):
+    with torch.no_grad():
+        padding = 10
+        nrow = 5
+        index = torch.ones(1).long().cuda()
+
+        data = (data * 0.5 + 0.5)
+        img = make_grid(data, padding=padding, nrow=nrow, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)
+
+        pre_img = torch.index_select(pre, 1, index)
+        pre_img = make_grid(pre_img, nrow=nrow, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+
+        ema_out_img = torch.index_select(ema_out, 1, index)
+        ema_out_img = make_grid(ema_out_img, nrow=nrow, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+
+        psuedo_target_img = torch.index_select(psuedo_target, 1, index)
+        psuedo_target_img = make_grid(psuedo_target_img, nrow=nrow, padding=padding, pad_value=0).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+
+        fig = plt.figure()
+        ax = fig.add_subplot(411)
+        ax.imshow(img)
+        ax.set_title('tarin img')
+        ax = fig.add_subplot(412)
+        ax.imshow(pre_img, 'jet')
+        ax.set_title('tarin prediction')
+        ax = fig.add_subplot(413)
+        ax.imshow(pre_img, 'jet')
+        ax.set_title('tarin ema_out')
+        ax = fig.add_subplot(414)
+        ax.imshow(psuedo_target_img, 'jet')
+        ax.set_title('train pseudo-label')
+        fig.tight_layout() 
+        writer.add_figure('train_predictions', fig, epoch)
+        fig.clear()
 
 def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
     #print(images.min())
@@ -381,7 +439,7 @@ def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
     #print(pred.min())
     with torch.no_grad():
         padding = 10
-        nrow = 4
+        nrow = 5
 
         img = make_grid(images, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
 

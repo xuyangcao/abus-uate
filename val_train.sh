@@ -1,5 +1,7 @@
 # emt_vat 
-python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_100 --max_val 1 --sample_k 100
+python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix10_100 --max_val 1 --sample_k 100 --mix
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix_100 --max_val 1 --sample_k 100 --mix
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_100 --max_val 1 --sample_k 100
 
 #python ./train_lstm_te.py --save ./work/gan_task2/lstm_te_100_1 --max_val 1 --sample_k 100 
 #python ./train_lstm_te.py --save ./work/gan_task2/lstm_te_100 --max_val 1 --sample_k 100 
