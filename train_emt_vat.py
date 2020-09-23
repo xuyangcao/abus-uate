@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
 import sys
 import argparse 
 import shutil
@@ -59,6 +59,7 @@ def get_args():
     parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
     parser.add_argument('--mix', action='store_true', default=False)
+    parser.add_argument('--is_vat', action='store_true', default=False)
 
     # frequently change args
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
@@ -182,6 +183,7 @@ loss_fn = {}
 loss_fn['dice_loss'] = DiceLoss()
 loss_fn['mask_dice_loss'] = MaskDiceLoss()
 loss_fn['mask_mse_loss'] = MaskMSELoss(args)
+get_r_adv = VATPerturbation()
 
 def main():
     #####################
@@ -277,8 +279,12 @@ def train(epoch, train_loader, Z, z, outputs):
 
         # read data
         data, target, psuedo_target = sample['image'], sample['target'], sample['psuedo_target']
-        data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
-        data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
+        data, target = Variable(data.cuda()), Variable(target.cuda(), requires_grad=False)
+        #data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
+        r_adv = get_r_adv(data, model)
+        data_aug = data + r_adv 
+        #print('r_adv.max(): ', r_adv.max())
+        #print('r_adv.min(): ', r_adv.min())
         psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)
 
         # feed to model 
@@ -336,8 +342,8 @@ def train(epoch, train_loader, Z, z, outputs):
         sup_loss_list.append(n_sup*sup_loss.item())
         unsup_loss_list.append(unsup_loss.item())
 
-        dis_pre2emapre = torch.norm((out - ema_out))
-        dis_pre2pseudopre = torch.norm((out - psuedo_target))
+        dis_pre2emapre = torch.norm((out - ema_out), p=1) / batch_size
+        dis_pre2pseudopre = torch.norm((out - psuedo_target), p=1) / batch_size
         writer.add_scalar('train_dis_pre2ema', dis_pre2emapre, iter_num)
         writer.add_scalar('train_dis_pre2pseu', dis_pre2pseudopre, iter_num)
         
