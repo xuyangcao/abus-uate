@@ -1,5 +1,7 @@
 # emt_vat 
-python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix10_100 --max_val 1 --sample_k 100 --mix
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_100_ori --max_val 1 --sample_k 100 
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_vat1_100 --max_val 1 --sample_k 100 --is_vat
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix10_100 --max_val 1 --sample_k 100 --mix
 #python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix_100 --max_val 1 --sample_k 100 --mix
 #python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_100 --max_val 1 --sample_k 100
 
@@ -41,6 +43,7 @@ python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix10_100 --max_val 1 
 #python ./train.py --save ./work/methods_2/te_1770 --max_val 1 --train_method semisuper --sample_k 1770 
 #python ./train.py --save ./work/methods_2/te_885 --max_val 1 --train_method semisuper --sample_k 885 
 #python ./train.py --save ./work/methods_2/te_300 --max_val 1 --train_method semisuper --sample_k 300 
+#python ./train.py --save ./work/methods_2/te_100 --max_val 1 --train_method semisuper --sample_k 100 
 
 
 # mtgan cutmix

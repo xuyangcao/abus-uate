@@ -45,7 +45,7 @@ def get_args():
     parser.add_argument('--batchsize', type=int, default=10)
     parser.add_argument('--ngpu', type=int, default=1)
 
-    parser.add_argument('--n_epochs', type=int, default=80)
+    parser.add_argument('--n_epochs', type=int, default=60)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     parser.add_argument('--lr', default=1e-4, type=float)
@@ -305,12 +305,14 @@ def train(epoch, train_loader, Z, z, outputs):
         sup_loss, n_sup = loss_fn['mask_dice_loss'](out, target)
         # unsuper loss
         if args.mix:
-            if epoch < 10:
+            if epoch < 3:
                 unsup_loss = F.mse_loss(out, ema_out)
             else:
-                unsup_loss = F.mse_loss(out, psuedo_target)
+                new_target = update_label(psuedo_target, ema_out, epoch)
+                unsup_loss = F.mse_loss(out, new_target)
         else:
-            unsup_loss = F.mse_loss(out, psuedo_target)
+            new_target = update_label(psuedo_target, ema_out, epoch)
+            unsup_loss = F.mse_loss(out, new_target)
         # total loss
         w = args.max_val * sigmoid_rampup(epoch, args.max_epochs)
         loss = sup_loss + w * unsup_loss
@@ -324,13 +326,13 @@ def train(epoch, train_loader, Z, z, outputs):
         # show unlabeled results 
         images_norm = data_aug * 0.5 + 0.5
         if batch_idx % 20 == 0:
-            show_results(images_norm, psuedo_target, out, 
-                         label_gt='pseudo_labels', 
-                         label_pre='prediction', 
-                         label_fig='train_unlabeled_results',
-                         i_iter=epoch 
-                         )
-            show_predictions(data, out, ema_out, psuedo_target, epoch)
+            #show_results(images_norm, psuedo_target, out, 
+            #             label_gt='pseudo_labels', 
+            #             label_pre='prediction', 
+            #             label_fig='train_unlabeled_results',
+            #             i_iter=epoch 
+            #             )
+            show_predictions(data, out, ema_out, new_target, epoch)
         # show results on tensorboard 
         nProcessed += len(data)
         partialEpoch = epoch + batch_idx / len(train_loader)
@@ -342,8 +344,8 @@ def train(epoch, train_loader, Z, z, outputs):
         sup_loss_list.append(n_sup*sup_loss.item())
         unsup_loss_list.append(unsup_loss.item())
 
-        dis_pre2emapre = torch.norm((out - ema_out), p=1) / batch_size
-        dis_pre2pseudopre = torch.norm((out - psuedo_target), p=1) / batch_size
+        dis_pre2emapre = torch.norm((out - ema_out), p=2) / batch_size
+        dis_pre2pseudopre = torch.norm((out - psuedo_target), p=2) / batch_size
         writer.add_scalar('train_dis_pre2ema', dis_pre2emapre, iter_num)
         writer.add_scalar('train_dis_pre2pseu', dis_pre2pseudopre, iter_num)
         
@@ -430,11 +432,11 @@ def show_predictions(data, pre, ema_out, psuedo_target, epoch):
         ax.imshow(pre_img, 'jet')
         ax.set_title('tarin prediction')
         ax = fig.add_subplot(413)
-        ax.imshow(pre_img, 'jet')
+        ax.imshow(ema_out_img, 'jet')
         ax.set_title('tarin ema_out')
         ax = fig.add_subplot(414)
         ax.imshow(psuedo_target_img, 'jet')
-        ax.set_title('train pseudo-label')
+        ax.set_title('train new_target')
         fig.tight_layout() 
         writer.add_figure('train_predictions', fig, epoch)
         fig.clear()
@@ -470,6 +472,13 @@ def show_results(images, gt, pred, label_gt, label_pre, label_fig, i_iter):
         fig.tight_layout() 
         writer.add_figure(label_fig, fig, i_iter)
         fig.clear()
+
+def update_label(Z, outputs, epoch):
+        alpha = args.alpha_psudo
+        Z = alpha * Z + (1 - alpha) * outputs
+        z = Z * (1. / (1.- alpha**(epoch + 1)))
+        return z
+
 
 if __name__ == '__main__':
     main()
