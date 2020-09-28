@@ -244,10 +244,7 @@ def main():
         oukputs, losses, sup_losses, unsup_losses, w, uncertain, adv_losses, D_losses = train(epoch, train_loader, Z, z, uncertain_map, outputs, T=args.time)
 
         # update
-        if args.is_uncertain:
-            alpha = (1 - uncertain) * args.alpha_psudo + uncertain
-        else:
-            alpha = args.alpha_psudo
+        alpha = args.alpha_psudo
         Z = alpha * Z + (1-alpha)*outputs
         z = Z * (1. / (1.-args.alpha_psudo**(epoch+1)))
 
@@ -301,9 +298,9 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
         train G
         ''' 
         # read data
-        data, target, psuedo_target, uncertain = sample['image'], sample['target'], sample['psuedo_target'], sample['uncertainty']
+        data, target, psuedo_target = sample['image'], sample['target'], sample['psuedo_target']
+        data, target = Variable(data.cuda()), Variable(target.cuda(), requires_grad=False)
         data_aug = gaussian_noise(data, batch_size, input_shape=(3, width, height))
-        data_aug, target = Variable(data_aug.cuda()), Variable(target.cuda(), requires_grad=False)
         psuedo_target = Variable(psuedo_target.cuda(), requires_grad=False)
 
         # train Segmentation Network, don't accumulate grads in D
@@ -313,51 +310,23 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
         # feed to model 
         out = model(data_aug)
         out = F.softmax(out, dim=1)
-        dice = DiceLoss.dice_coeficient(out.max(1)[1], target) 
-
-        # uncertainty
-        with torch.no_grad():
-            out_hat_shape = (T+1,) + out.shape
-            temp_out_shape = (1, ) + out.shape
-            out_hat = Variable(torch.zeros(out_hat_shape).float().cuda(), requires_grad=False)
-            out_hat[0] = out.view(temp_out_shape)
-            for t in range(T):
-                data_aug_u = gaussian_noise(data, batch_size, input_shape=(3, width, height))
-                data_aug_u = Variable(data_aug.cuda())
-                out_hat[t+1] = F.softmax(model(data_aug_u), dim=1).view(temp_out_shape)
-            epistemic = torch.mean(out_hat**2, 0) - torch.mean(out_hat, 0)**2
-            epistemic = (epistemic - epistemic.min()) / (epistemic.max() - epistemic.min())
-
-            out_u = out_hat[0]
 
         # update uncertainty map and output map
         for i, j in enumerate(indices):
-            outputs[j] = out_u[i].data.clone().cpu()
-        uncertain_temp = epistemic
-        for i, j in enumerate(indices):
-            uncertain_map[j] = uncertain_temp[i]
+            outputs[j] = out[i].data.clone().cpu()
             
         # super loss
         sup_loss, n_sup = loss_fn['mask_dice_loss'](out, target)
-        
         # unsuper loss
-        if epoch > 9 and args.consis_method == 'hard':
-            zcomp = torch.max(psuedo_target, dim=1, keepdim=True)[1]
-            zcomp = one_hot(zcomp)
-        else:
-            zcomp = psuedo_target
-        threshold = 0.15
-        if args.is_uncertain:
-            unsup_loss = loss_fn['mask_mse_loss'](out, zcomp, uncertain_temp, th=threshold)
-        else:
-            unsup_loss = F.mse_loss(out, zcomp)
+        unsup_loss = F.mse_loss(out, psuedo_target)
 
         # adv loss
-        images_norm = data_aug * 0.5 + 0.5
+        images_norm = data * 0.5 + 0.5
         pred_cat = torch.cat((out, images_norm[:, 0:1, ...]), dim=1)
         D_out_all, _ = model_D(pred_cat)
         label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
         loss_adv = F.binary_cross_entropy_with_logits(D_out_all, label_)
+
         # show unlabeled results
         if batch_idx % 20 == 0:
             show_results(images_norm, zcomp, out, 
