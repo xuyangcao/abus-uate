@@ -47,7 +47,7 @@ def get_args():
     # dataset config
     parser.add_argument('--root_path', default='/data/xuyangcao/code/data/abus_2d/', type=str)
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--batchsize', type=int, default=10)
+    parser.add_argument('--batchsize', type=int, default=20)
 
     # optimizer
     parser.add_argument('--lr', default=1e-4, type=float)
@@ -56,7 +56,7 @@ def get_args():
     parser.add_argument('--weight_decay_D', default=1e-4, type=float)
 
     # network config
-    parser.add_argument('--arch', default='resunet', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
+    parser.add_argument('--arch', default='dense121', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
 
     # semisupervised config
@@ -72,6 +72,7 @@ def get_args():
 
     # gan config
     parser.add_argument("--lambda_adv", type=float, default=0.01)
+    parser.add_argument("--lambda_fm", type=float, default=0.1)
 
     # save config 
     parser.add_argument('--log_dir', default='./log/uategan')
@@ -81,8 +82,8 @@ def get_args():
     return args
 
 def gen_label(shape):
-    #return np.random.rand(*shape)*0.3
-    return np.zeros(shape) 
+    #return np.random.rand(*shape)*0.1
+    return np.zeros(shape, dtype=np.float16) 
 
 def main():
     #############
@@ -131,11 +132,11 @@ def main():
     elif args.arch == 'dense201': 
         model = DenseUnet(arch='201', pretrained=True, num_classes=2, drop_rate=args.drop_rate)
     elif args.arch == 'resunet': 
-        model = UNet(3, 2, relu=True, dropout=0.3)
+        model = UNet(3, 2, relu=False, dropout=args.drop_rate)
     else:
         raise(RuntimeError('error in building network!'))
-    #model_D = s4GAN_discriminator(in_channels=3, num_classes=2)
-    model_D = Discriminator(in_channels=3, num_classes=2)
+    model_D = s4GAN_discriminator(in_channels=3, num_classes=2)
+    #model_D = Discriminator(in_channels=3, num_classes=2, relu=False, dropout=args.drop_rate)
     if args.ngpu > 1:
         model = nn.parallel.DataParallel(model, list(range(args.ngpu)))
         model_D = nn.parallel.DataParallel(model_D, list(range(args.ngpu)))
@@ -208,7 +209,6 @@ def main():
     loss_fn['mask_dice_loss'] = MaskDiceLoss()
     loss_fn['mask_mse_loss'] = MaskMSELoss(args)
     loss_fn['bce'] = nn.BCELoss()
-
 
     #####################
     #   strat training  #
@@ -291,7 +291,7 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
     sup_loss_list = []
     unsup_loss_list = []
     loss_list = []
-    loss_adv_list = []
+    loss_fm_list = []
     loss_D_list = []
 
     for batch_idx, sample_indices in enumerate(train_loader):
@@ -359,39 +359,10 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
             w = Variable(torch.FloatTensor([w]).cuda(), requires_grad=False)
             loss = sup_loss + w * unsup_loss
 
-        # adv loss
+        # feature mapping loss
         images_norm = data * 0.5 + 0.5
         pred_cat = torch.cat((out, images_norm[:, 0:1, ...]), dim=1)
-        D_out_all, _ = model_D(pred_cat)
-
-        label_ = 1 - gen_label((D_out_all.size(0), 1))
-        label_ = torch.from_numpy(label_).float().cuda()
-        #label_ = Variable(torch.ones(D_out_all.size(0), 1).cuda())
-        loss_adv = loss_fn['bce'](D_out_all, label_)
-
-        # show unlabeled results
-        if batch_idx % 20 == 0:
-            show_results(images_norm, psuedo_target, out, 
-                         label_gt='pseudo_labels', 
-                         label_pre='prediction', 
-                         label_fig='train_unlabeled_results',
-                         i_iter=epoch,
-                         writer=writer,
-                         )
-
-        # total loss
-        loss = loss + args.lambda_adv * loss_adv
-
-        # back propagation
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        '''
-        train D
-        '''
-        for param in model_D.parameters():
-            param.requires_grad = True
+        D_out_all, D_out_y_pred = model_D(pred_cat)
 
         # train with gt
         try:
@@ -404,21 +375,49 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
         images_gt = images_gt * 0.5 + 0.5
         gt_onehot = one_hot(labels_gt)
         gt_cat = torch.cat((gt_onehot, images_gt[:, 0:1, ...]), dim=1)
+        D_out_real, D_out_y_gt = model_D(gt_cat)
+
+        # L1 loss for Feature Matching Loss
+        loss_fm = torch.mean(torch.abs(torch.mean(D_out_y_gt, 0) - torch.mean(D_out_y_pred, 0)))
+
+        ## show unlabeled results
+        #if batch_idx % 20 == 0:
+        #    show_results(images_norm, psuedo_target, out, 
+        #                 label_gt='pseudo_labels', 
+        #                 label_pre='prediction', 
+        #                 label_fig='train_unlabeled_results',
+        #                 i_iter=epoch,
+        #                 writer=writer,
+        #                 )
+
+        # total loss
+        loss = loss + args.lambda_fm * loss_fm
+
+        # back propagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        '''
+        train D
+        '''
+        for param in model_D.parameters():
+            param.requires_grad = True
+
         D_out_real, _ = model_D(gt_cat)
         print('Dout_real: ', D_out_real.detach().cpu().numpy().flatten())
-
         y_real_ = 1 - gen_label((D_out_real.size(0), 1))
         y_real_ = torch.from_numpy(y_real_).float().cuda()
-        #y_real_ = Variable(torch.ones(D_out_real.size(0), 1).cuda()) 
+        #print('y_real_: ', y_real_.cpu().numpy())
         loss_D_real = loss_fn['bce'](D_out_real, y_real_)
 
         # train with pred
-        pred_cat = torch.cat((out.detach(), images_norm[:, 0:1, ...]), dim=1)
+        pred_cat = pred_cat.detach() 
         D_out_fake, _ = model_D(pred_cat)
-        print('Dout_fake: ', D_out_all.detach().cpu().numpy().flatten())
-        #y_fake_ = Variable(torch.zeros(pred_cat.size(0), 1).cuda())
-        y_fake_ = 1 - gen_label((pred_cat.size(0), 1))
+        print('Dout_fake: ', D_out_fake.detach().cpu().numpy().flatten())
+        y_fake_ = gen_label((pred_cat.size(0), 1))
         y_fake_ = torch.from_numpy(y_fake_).float().cuda()
+        #print('y_fake_: ', y_fake_.cpu().numpy())
         loss_D_fake = loss_fn['bce'](D_out_fake, y_fake_) 
         # total loss D
         loss_D = (loss_D_fake + loss_D_real) / 2.0
@@ -437,14 +436,18 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
                 padding = 10
                 nrow = 4
 
+                fake_img = make_grid(images_norm, nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)
                 input_real = make_grid(gt_onehot[:, 1:, ...], nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0] 
                 input_fake = make_grid(out[:, 1:, ...], nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
 
                 fig = plt.figure()
-                ax = fig.add_subplot(211)
+                ax = fig.add_subplot(311)
                 ax.imshow(input_real, 'jet')
                 ax.set_title('input_real')
-                ax = fig.add_subplot(212)
+                ax = fig.add_subplot(312)
+                ax.imshow(fake_img, 'gray')
+                ax.set_title('fake_img')
+                ax = fig.add_subplot(313)
                 ax.imshow(input_fake, 'jet')
                 ax.set_title('input_fake')
                 fig.tight_layout() 
@@ -459,9 +462,10 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
         loss_list.append(loss.item())
         sup_loss_list.append(n_sup*sup_loss.item())
         unsup_loss_list.append(unsup_loss.item())
-        loss_adv_list.append(loss_adv.item())
+        loss_fm_list.append(loss_fm.item())
         loss_D_list.append(loss_D.item())
-    return outputs, loss_list, sup_loss_list, unsup_loss_list, w, uncertain_map, loss_adv_list, loss_D_list
+    return outputs, loss_list, sup_loss_list, unsup_loss_list, w, uncertain_map, loss_fm_list, loss_D_list
+
 
 def val(args, epoch, model, val_loader, optimizer, loss_fn, writer):
     model.eval()
