@@ -81,7 +81,8 @@ def get_args():
     return args
 
 def gen_label(shape):
-    return np.random.rand(*shape)*0.3
+    #return np.random.rand(*shape)*0.3
+    return np.zeros(shape) 
 
 def main():
     #############
@@ -430,6 +431,26 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
         '''
         visualize
         '''
+        if batch_idx % 5 == 0: 
+            # show Dout
+            with torch.no_grad():
+                padding = 10
+                nrow = 4
+
+                input_real = make_grid(gt_onehot[:, 1:, ...], nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0] 
+                input_fake = make_grid(out[:, 1:, ...], nrow=nrow, padding=padding).cpu().detach().numpy().transpose(1, 2, 0)[:, :, 0]
+
+                fig = plt.figure()
+                ax = fig.add_subplot(211)
+                ax.imshow(input_real, 'jet')
+                ax.set_title('input_real')
+                ax = fig.add_subplot(212)
+                ax.imshow(input_fake, 'jet')
+                ax.set_title('input_fake')
+                fig.tight_layout() 
+                writer.add_figure('D_input', fig, epoch)
+                fig.clear()
+
         # show result
         nProcessed += len(data)
         partialEpoch = epoch + batch_idx / len(train_loader)
