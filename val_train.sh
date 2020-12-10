@@ -1,4 +1,18 @@
+# uate gan
+python ./train_uategan.py --save ./work/uategan/uategan_100_Dunet_leakrelu_dropout --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
+#python ./train_uategan.py --save ./work/uategan/uategan_100_Dunet --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
+#python ./train_uategan.py --save ./work/uategan/uategan_bce_100_wd4 --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
+#python ./train_uategan.py --save ./work/uategan/uategan_bce_100 --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
+#python ./train_uategan.py --save ./work/uategan/uategan_baseline --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
+
+
+# tegan_method
+#python ./train_tegan.py --save ./work/tegan/tegan_300 --max_val 1 --sample_k 300 # reduce HD compread with te model
+#python ./train_tegan.py --save ./work/tegan/tegan_100 --max_val 1 --sample_k 100 # reduce HD compread with te model
+
 # emt_vat 
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_885_ori --max_val 1 --sample_k 885 
+#python ./train_emt_vat.py --save ./work/gan_task2/emt_300_ori --max_val 1 --sample_k 300 
 #python ./train_emt_vat.py --save ./work/gan_task2/emt_100_ori --max_val 1 --sample_k 100 
 #python ./train_emt_vat.py --save ./work/gan_task2/emt_vat1_100 --max_val 1 --sample_k 100 --is_vat
 #python ./train_emt_vat.py --save ./work/gan_task2/emt_vat_mix10_100 --max_val 1 --sample_k 100 --mix
@@ -33,8 +47,6 @@
 # mean teacher methods_2
 #python ./train_mt.py --save ./work/methods_2/mean_teacher --max_val 1 --sample_k 100 
 
-# tegan_method
-#python ./train_tegan.py --save ./work/methods_2/tegan_885 --max_val 1 --sample_k 885 # reduce HD compread with te model
 
 # uate methods_2
 #python ./train.py --save ./work/methods_2/uate_100 --max_val 0.1 --train_method semisuper --is_uncertain --sample_k 100 

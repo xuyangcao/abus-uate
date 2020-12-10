@@ -8,7 +8,8 @@ def passthrough(x, **kwargs):
 
 def RELUCons(relu, nchan):
     if relu:
-        return nn.RELU(inplace=True)
+        #return nn.RELU(inplace=True)
+        return nn.LeakyReLU(0.1, inplace=True)
     else:
         return nn.PReLU(nchan)
 
@@ -61,7 +62,7 @@ class InputTransition(nn.Module):
         return out
 
 class DownTransition(nn.Module):
-    def __init__(self, in_channels, n_convs, relu, dropout=False):
+    def __init__(self, in_channels, n_convs, relu, dropout=0.2):
         super(DownTransition, self).__init__()
         out_channels = 2 * in_channels
         # sample by convolution
@@ -73,7 +74,7 @@ class DownTransition(nn.Module):
         self.ops = _make_nConv(out_channels, n_convs, relu)
         self.do1 = passthrough
         if dropout:
-            self.do1 = nn.Dropout2d()
+            self.do1 = nn.Dropout2d(dropout)
     
     def forward(self, x):
         down = self.relu1(self.bn1(self.down_conv(x)))
@@ -85,7 +86,7 @@ class DownTransition(nn.Module):
         return out
 
 class UpTransition(nn.Module):
-    def __init__(self, in_channels, out_channels, n_convs, relu, dropout=False):
+    def __init__(self, in_channels, out_channels, n_convs, relu, dropout=0.2):
         super(UpTransition, self).__init__()
         #print('{} / {}'.format(in_channels, out_channels))
         self.up_conv = nn.ConvTranspose2d(in_channels, out_channels // 2, kernel_size=2, stride=2)
@@ -96,7 +97,7 @@ class UpTransition(nn.Module):
         self.ops = _make_nConv(out_channels, n_convs, relu)
         self.do1 = passthrough
         if dropout:
-            self.do1 = nn.Dropout2d()
+            self.do1 = nn.Dropout2d(dropout)
 
     def forward(self, x, skipx):
         x = self.do1(x)
@@ -125,19 +126,19 @@ class OutputTransition(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, in_ch=3, num_classes=2, relu=False):
+    def __init__(self, in_ch=3, num_classes=2, relu=True, dropout=0.3):
         super(UNet, self).__init__()
 
         self.input_tr = InputTransition(3, 32, relu)
-        self.down_tr64 = DownTransition(32, 5, relu, dropout=False)
-        self.down_tr128 = DownTransition(64, 5, relu, dropout=False)
-        self.down_tr256 = DownTransition(128, 5, relu, dropout=False)
-        self.down_tr512 = DownTransition(256, 5, relu, dropout=False)
+        self.down_tr64 = DownTransition(32, 5, relu, dropout)
+        self.down_tr128 = DownTransition(64, 5, relu, dropout)
+        self.down_tr256 = DownTransition(128, 5, relu, dropout)
+        self.down_tr512 = DownTransition(256, 5, relu, dropout)
         
-        self.up_tr512 = UpTransition(512, 512, 5, relu, dropout=False)
-        self.up_tr128 = UpTransition(512, 256, 5, relu, dropout=False)
-        self.up_tr64 = UpTransition(256, 128, 5, relu, dropout=False)
-        self.up_tr32 = UpTransition(128, 64, 5, relu, dropout=False)
+        self.up_tr512 = UpTransition(512, 512, 5, relu, dropout)
+        self.up_tr128 = UpTransition(512, 256, 5, relu, dropout)
+        self.up_tr64 = UpTransition(256, 128, 5, relu, dropout)
+        self.up_tr32 = UpTransition(128, 64, 5, relu, dropout)
 
         self.out_tr = OutputTransition(64, num_classes, relu)
 
