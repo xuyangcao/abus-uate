@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '1' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '1,2' 
 import sys
 import argparse 
 import shutil
@@ -39,7 +39,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     # general config
     parser.add_argument('--gpu', default=0, type=int)
-    parser.add_argument('--ngpu', type=int, default=1)
+    parser.add_argument('--ngpu', type=int, default=2)
     parser.add_argument('--seed', default=6, type=int) 
     parser.add_argument('--n_epochs', type=int, default=60)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
@@ -47,7 +47,7 @@ def get_args():
     # dataset config
     parser.add_argument('--root_path', default='/data/xuyangcao/code/data/abus_2d/', type=str)
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--batchsize', type=int, default=20)
+    parser.add_argument('--batchsize', type=int, default=10)
 
     # optimizer
     parser.add_argument('--lr', default=1e-4, type=float)
@@ -56,7 +56,7 @@ def get_args():
     parser.add_argument('--weight_decay_D', default=1e-4, type=float)
 
     # network config
-    parser.add_argument('--arch', default='dense121', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
+    parser.add_argument('--arch', default='dense161', type=str, choices=('dense161', 'dense121', 'dense201', 'unet', 'resunet'))
     parser.add_argument('--drop_rate', default=0.3, type=float)
 
     # semisupervised config
@@ -82,7 +82,7 @@ def get_args():
     return args
 
 def gen_label(shape):
-    #return np.random.rand(*shape)*0.1
+    #return np.random.rand(*shape)*0.3
     return np.zeros(shape, dtype=np.float16) 
 
 def main():

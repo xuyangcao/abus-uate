@@ -67,8 +67,8 @@ def get_args():
     # frequently change args
     parser.add_argument('--is_uncertain', default=False, action='store_true') 
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--log_dir', default='./log/methods_2')
-    parser.add_argument('--save', default='./work/methods_2/test')
+    parser.add_argument('--log_dir', default='./log/tegan')
+    parser.add_argument('--save', default='./work/tegan/test')
 
     args = parser.parse_args()
     return args
@@ -329,7 +329,7 @@ def train(epoch, train_loader, Z, z, uncertain_map, outputs, T=2):
 
         # show unlabeled results
         if batch_idx % 20 == 0:
-            show_results(images_norm, zcomp, out, 
+            show_results(images_norm, psuedo_target, out, 
                          label_gt='pseudo_labels', 
                          label_pre='prediction', 
                          label_fig='train_unlabeled_results',

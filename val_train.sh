@@ -1,5 +1,7 @@
 # uate gan
-python ./train_uategan.py --save ./work/uategan/uategan_100_Dunet_leakrelu_dropout --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
+python ./train_uategan.py --save ./work/uategan/uategan_100_sDunet --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6 --arch dense161 --batchsize 10
+#python ./train_uategan.py --save ./work/uategan/uategan_100_Dunet_leakrelu_dropout_0.3 --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6 --arch dense161 --batchsize 10
+#python ./train_uategan.py --save ./work/uategan/uategan_100_Dunet_leakrelu_dropout --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
 #python ./train_uategan.py --save ./work/uategan/uategan_100_Dunet --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
 #python ./train_uategan.py --save ./work/uategan/uategan_bce_100_wd4 --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
 #python ./train_uategan.py --save ./work/uategan/uategan_bce_100 --max_val 0.1 --sample_k 100 --is_uncertain --alpha_psudo 0.6
