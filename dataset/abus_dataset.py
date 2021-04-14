@@ -233,15 +233,16 @@ class ToTensor(object):
 
 
 if __name__ == "__main__":
-    root_path = '../data/'
-    mode = 'train'
+    root_path = '../../data/'
+    mode = 'test'
     if mode == 'test':
         transform = transforms.Compose([ElasticTransform(mode='test'),
                                         ToTensor(mode='test'),
                                         Normalize(mean=0.5, std=0.5, mode='test') 
                                         ])
         test_set = ABUS_2D(base_dir=root_path, mode='test', data_num_labeled=None, use_unlabeled_data=False, transform=transform, psuedo_target=None, uncertain_map=None)
-        test_loader = DataLoader(test_set, batch_size=2, shuffle=True, pin_memory=False)
+        test_loader = DataLoader(test_set, batch_size=1, shuffle=True, pin_memory=False)
+        print('len(test_loader): ', len(test_loader))
         for idx, sample in enumerate(test_loader):
             image, target = sample['image'], sample['target']
             print('image.shape: ', image.shape)

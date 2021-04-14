@@ -1,5 +1,5 @@
 import os 
-os.environ["CUDA_VISIBLE_DEVICES"] = '1,2' 
+os.environ["CUDA_VISIBLE_DEVICES"] = '2' 
 import sys
 import argparse 
 import shutil
@@ -33,23 +33,25 @@ from dataset.abus_dataset import ABUS_2D, ElasticTransform, ToTensor, Normalize
 from utils.loss import DiceLoss, MaskDiceLoss, MaskMSELoss
 from utils.ramps import sigmoid_rampup 
 from utils.utils import save_checkpoint, gaussian_noise, confusion, one_hot
+from utils.lr_scheduler import LR_Scheduler
 
 def get_args():
     print('initing args------')
     parser = argparse.ArgumentParser()
     # general config
     parser.add_argument('--gpu', default=0, type=int)
-    parser.add_argument('--ngpu', type=int, default=2)
+    parser.add_argument('--ngpu', type=int, default=1)
     parser.add_argument('--seed', default=6, type=int) 
-    parser.add_argument('--n_epochs', type=int, default=60)
+    parser.add_argument('--n_epochs', type=int, default=100)
     parser.add_argument('--start-epoch', default=1, type=int, metavar='N')
 
     # dataset config
     parser.add_argument('--root_path', default='/data/xuyangcao/code/data/abus_2d/', type=str)
     parser.add_argument('--sample_k', '-k', default=100, type=int, choices=(100, 300, 885, 1770, 4428, 8856)) 
-    parser.add_argument('--batchsize', type=int, default=10)
+    parser.add_argument('--batchsize', type=int, default=20)
 
     # optimizer
+    parser.add_argument('--lr_scheduler', type=str, default='cos', choices=['poly', 'step', 'cos'])
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument("--lr_D", type=float, default=1e-4)
@@ -188,6 +190,12 @@ def main():
     batch_size = args.ngpu*args.batchsize
     def worker_init_fn(worker_id):
         random.seed(args.seed+worker_id)
+    train_loader = DataLoader(train_set, 
+                              batch_size=batch_size, 
+                              shuffle=True, 
+                              return_index=True, 
+                              worker_init_fn=worker_init_fn, 
+                              **kwargs)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=True,worker_init_fn=worker_init_fn, **kwargs)
     trainloader_gt = DataLoader(train_set_gt, 
                               batch_size=batch_size, 
@@ -201,8 +209,11 @@ def main():
     logging.info('--- configing optimizer & losses ---')
     lr = args.lr
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=args.weight_decay)
+    lr_scheduler_G = LR_Scheduler(args.lr_scheduler, args.lr, args.n_epochs, len(train_loader))
+
     lr_D = args.lr_D
     optimizer_D = optim.Adam(model_D.parameters(), lr=lr_D, weight_decay=args.weight_decay_D)
+    lr_scheduler_D = LR_Scheduler(args.lr_scheduler, args.lr_D, args.n_epochs, len(train_loader))
 
     loss_fn = {}
     loss_fn['dice_loss'] = DiceLoss()
@@ -226,17 +237,17 @@ def main():
     uncertain_map = torch.zeros(nTrain, 2, width, height).float()  
     for epoch in range(args.start_epoch, args.n_epochs + 1):
         # learning rate
-        if epoch % 30 == 0:
-            if epoch % 60 == 0:
-                lr *= 0.2
-                lr_D *= 0.5
-            else:
-                lr *= 0.5
-                lr_D *= 0.5
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
-        for param_group in optimizer_D.param_groups:
-            param_group['lr'] = lr_D
+        #if epoch % 30 == 0:
+        #    if epoch % 60 == 0:
+        #        lr *= 0.2
+        #        lr_D *= 0.5
+        #    else:
+        #        lr *= 0.5
+        #        lr_D *= 0.5
+        #for param_group in optimizer.param_groups:
+        #    param_group['lr'] = lr
+        #for param_group in optimizer_D.param_groups:
+        #    param_group['lr'] = lr_D
 
         train_set.psuedo_target = z
         train_set.uncertain_map = uncertain_map
@@ -246,7 +257,7 @@ def main():
                                   return_index=True, 
                                   worker_init_fn=worker_init_fn, 
                                   **kwargs)
-        oukputs, losses, sup_losses, unsup_losses, w, uncertain, adv_losses, D_losses = train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, optimizer_D, loss_fn, writer, Z, z, uncertain_map, outputs, T=args.time)
+        oukputs, losses, sup_losses, unsup_losses, w, uncertain, adv_losses, D_losses = train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, optimizer_D, loss_fn, writer, Z, z, uncertain_map, outputs, T=args.time, lr_scheduler_G=lr_scheduler_G, lr_scheduler_D=lr_scheduler_D)
         
         # update pseudo labels
         if args.is_uncertain:
@@ -276,11 +287,10 @@ def main():
         writer.add_scalar('D_losses/epoch', np.mean(D_losses), epoch)
         writer.add_scalar('adv_losses/epoch', np.mean(adv_losses), epoch)
         writer.add_scalar('w/epoch', w.item(), epoch)
-        writer.add_scalar('lr/epoch', lr, epoch)
     writer.close()
 
 
-def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, optimizer_D, loss_fn, writer, Z, z, uncertain_map, outputs, T=2, debug=False):
+def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, optimizer_D, loss_fn, writer, Z, z, uncertain_map, outputs, T=2, debug=False, lr_scheduler_G=None, lr_scheduler_D=None):
     model.train()
     model_D.train()
     width = 128 
@@ -381,19 +391,20 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
         loss_fm = torch.mean(torch.abs(torch.mean(D_out_y_gt, 0) - torch.mean(D_out_y_pred, 0)))
 
         ## show unlabeled results
-        #if batch_idx % 20 == 0:
-        #    show_results(images_norm, psuedo_target, out, 
-        #                 label_gt='pseudo_labels', 
-        #                 label_pre='prediction', 
-        #                 label_fig='train_unlabeled_results',
-        #                 i_iter=epoch,
-        #                 writer=writer,
-        #                 )
+        if batch_idx % 20 == 0:
+            show_results(images_norm, psuedo_target, out, 
+                         label_gt='pseudo_labels', 
+                         label_pre='prediction', 
+                         label_fig='train_unlabeled_results',
+                         i_iter=epoch,
+                         writer=writer,
+                         )
 
         # total loss
         loss = loss + args.lambda_fm * loss_fm
 
         # back propagation
+        lr = lr_scheduler_G(optimizer, batch_idx, epoch)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -423,6 +434,7 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
         loss_D = (loss_D_fake + loss_D_real) / 2.0
 
         # back propagation
+        lr_D = lr_scheduler_D(optimizer_D, batch_idx, epoch)
         optimizer_D.zero_grad()
         loss_D.backward()
         optimizer_D.step()
@@ -464,6 +476,9 @@ def train(args, epoch, model, model_D, train_loader, trainloader_gt, optimizer, 
         unsup_loss_list.append(unsup_loss.item())
         loss_fm_list.append(loss_fm.item())
         loss_D_list.append(loss_D.item())
+
+    writer.add_scalar('lr/epoch', lr, epoch)
+    writer.add_scalar('lr_D/epoch', lr_D, epoch)
     return outputs, loss_list, sup_loss_list, unsup_loss_list, w, uncertain_map, loss_fm_list, loss_D_list
 
 
